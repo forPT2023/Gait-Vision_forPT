@@ -663,16 +663,19 @@
       };
       
       // Calculate angle from vertical (Y-axis)
-      // In MediaPipe: Y goes down, so we use Y difference
-      const dy = shoulderMid.y - hipMid.y; // Should be negative (shoulder above hip)
-      const dz = shoulderMid.z - hipMid.z; // Forward/backward
+      // In MediaPipe world coordinates: Y is vertical (up is negative), Z is depth (camera direction)
+      // For sagittal plane (side view): we need the angle between trunk vector and vertical
+      const dy = hipMid.y - shoulderMid.y; // Vertical component (should be positive: hip below shoulder)
+      const dz = shoulderMid.z - hipMid.z; // Forward/backward lean (positive = leaning forward)
       
       // Trunk angle from vertical in sagittal plane
-      const angle = Math.abs(Math.atan2(dz, Math.abs(dy)) * (180 / Math.PI));
+      // If perfectly upright: dz ≈ 0, angle ≈ 0
+      // If leaning forward: dz > 0, angle > 0
+      const angle = Math.abs(Math.atan2(dz, dy) * (180 / Math.PI));
       
       // Debug log (1% sampling)
       if (Math.random() < 0.01) {
-        console.log('[Trunk] dy:', dy.toFixed(4), 'dz:', dz.toFixed(4), 'angle:', angle.toFixed(2), '°');
+        console.log('[Trunk] dy:', dy.toFixed(4), '| dz:', dz.toFixed(4), '| angle:', angle.toFixed(2), '°');
       }
       
       return isFinite(angle) ? angle : 0;
@@ -721,21 +724,22 @@
       }
       
       // Speed calculation:
-      // MediaPipe world coordinates are in meters relative to the hip
-      // Average shoulder width is ~0.4m, but MediaPipe may scale differently
-      // Use actual measured shoulder width as reference
-      // Speed = displacement / time
-      const speedMps = displacement / (deltaT / 1000);
+      // MediaPipe world coordinates are in normalized units relative to the hip
+      // We need to scale to real-world units using shoulder width as reference
+      // Average human shoulder width is ~0.4m (40cm)
+      // Speed = (displacement / shoulderWidth) * 0.4m / time
+      const scaledDisplacement = (displacement / shoulderWidth) * 0.4; // Convert to meters
+      const speedMps = scaledDisplacement / (deltaT / 1000);
       
       // Debug log (1% sampling)
       if (Math.random() < 0.01) {
-        console.log('[Speed] displacement:', displacement.toFixed(5), 'm | shoulderWidth:', shoulderWidth.toFixed(3), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
+        console.log('[Speed] displacement:', displacement.toFixed(5), '| shoulderWidth:', shoulderWidth.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
       }
       
       // Sanity check: walking speed should be 0-3 m/s
-      // Note: MediaPipe coordinates might need calibration
+      // Normal walking: 0.8-1.5 m/s, Fast walking: 1.5-2.5 m/s
       if (isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
-        console.warn('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), 'm | shoulderWidth:', shoulderWidth.toFixed(3), 'm | deltaT:', deltaT.toFixed(1), 'ms');
+        console.warn('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), '| shoulderWidth:', shoulderWidth.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
         return Math.max(0, Math.min(3, speedMps)); // Clamp instead of returning 0
       }
       
