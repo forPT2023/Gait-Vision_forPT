@@ -610,13 +610,26 @@
     
     // Gait analysis functions
     function calcAngle3D(a, b, c) {
+      // Validate input points
+      if (!a || !b || !c || 
+          typeof a.x !== 'number' || typeof a.y !== 'number' || typeof a.z !== 'number' ||
+          typeof b.x !== 'number' || typeof b.y !== 'number' || typeof b.z !== 'number' ||
+          typeof c.x !== 'number' || typeof c.y !== 'number' || typeof c.z !== 'number') {
+        return 0;
+      }
+      
       const ba = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
       const bc = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
       const dot = ba.x * bc.x + ba.y * bc.y + ba.z * bc.z;
       const magBA = Math.sqrt(ba.x * ba.x + ba.y * ba.y + ba.z * ba.z);
       const magBC = Math.sqrt(bc.x * bc.x + bc.y * bc.y + bc.z * bc.z);
-      if (magBA === 0 || magBC === 0) return 0;
-      return Math.acos(Math.max(-1, Math.min(1, dot / (magBA * magBC)))) * (180 / Math.PI);
+      
+      if (magBA === 0 || magBC === 0 || isNaN(magBA) || isNaN(magBC)) return 0;
+      
+      const cosAngle = dot / (magBA * magBC);
+      const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle))) * (180 / Math.PI);
+      
+      return isNaN(angle) || !isFinite(angle) ? 0 : angle;
     }
     
     function calcJointAngles(wl) {
@@ -652,7 +665,8 @@
     }
     
     function calcWalkingSpeed(wl, prevWl, deltaT) {
-      if (!wl || !prevWl || !deltaT || wl.length < 33 || prevWl.length < 33) return 0;
+      if (!wl || !prevWl || !deltaT || deltaT <= 0 || wl.length < 33 || prevWl.length < 33) return 0;
+      
       // Use 3D world landmarks for accurate speed calculation
       const hipMid = { 
         x: (wl[LM.LEFT_HIP].x + wl[LM.RIGHT_HIP].x) / 2, 
@@ -664,43 +678,90 @@
         y: (prevWl[LM.LEFT_HIP].y + prevWl[LM.RIGHT_HIP].y) / 2,
         z: (prevWl[LM.LEFT_HIP].z + prevWl[LM.RIGHT_HIP].z) / 2
       };
+      
       // Calculate 3D displacement
       const displacement = Math.sqrt(
         Math.pow(hipMid.x - prevHipMid.x, 2) + 
         Math.pow(hipMid.y - prevHipMid.y, 2) + 
         Math.pow(hipMid.z - prevHipMid.z, 2)
       );
+      
       // Calculate shoulder width for scaling (3D distance)
       const shoulderWidth = Math.sqrt(
         Math.pow(wl[LM.LEFT_SHOULDER].x - wl[LM.RIGHT_SHOULDER].x, 2) + 
         Math.pow(wl[LM.LEFT_SHOULDER].y - wl[LM.RIGHT_SHOULDER].y, 2) + 
         Math.pow(wl[LM.LEFT_SHOULDER].z - wl[LM.RIGHT_SHOULDER].z, 2)
       );
+      
+      // Prevent division by zero
+      if (shoulderWidth < 0.1 || isNaN(shoulderWidth)) {
+        console.warn('[Speed] Invalid shoulder width:', shoulderWidth);
+        return 0;
+      }
+      
       // Speed = (displacement / shoulder_width) * 0.4m (avg shoulder width) / time
       // Convert from meters/millisecond to meters/second
-      return (displacement / (shoulderWidth || 0.4) * 0.4 / deltaT) * 1000;
+      // Formula: (displacement_normalized * reference_width_meters) / (deltaT_ms / 1000)
+      const speedMps = (displacement / shoulderWidth) * 0.4 / (deltaT / 1000);
+      
+      // Sanity check: walking speed should be 0-3 m/s
+      if (isNaN(speedMps) || speedMps < 0 || speedMps > 3) {
+        console.warn('[Speed] Invalid speed:', speedMps, 'displacement:', displacement, 'shoulderWidth:', shoulderWidth, 'deltaT:', deltaT);
+        return 0;
+      }
+      
+      return speedMps;
     }
     
     function calcSymmetryIndex(left, right) {
+      // Validate inputs
+      if (typeof left !== 'number' || typeof right !== 'number' || 
+          isNaN(left) || isNaN(right) || !isFinite(left) || !isFinite(right)) {
+        return 100;
+      }
+      
       if (left === 0 && right === 0) return 100;
+      
       const mean = (left + right) / 2;
       if (mean === 0) return 100;
-      return 100 - (Math.abs(left - right) / mean * 100);
+      
+      const symmetry = 100 - (Math.abs(left - right) / mean * 100);
+      
+      // Clamp to 0-100 range
+      return Math.max(0, Math.min(100, symmetry));
     }
     
     function detectGaitEvents(lm, timestamp) {
       if (!lm || lm.length < 33) return null;
+      
+      // MediaPipe Y coordinate: 0 = top, 1 = bottom
+      // Heel strike = heel moves DOWN (Y increases)
       const leftHeelY = lm[LM.LEFT_HEEL].y;
       const rightHeelY = lm[LM.RIGHT_HEEL].y;
+      
+      // Get hip Y positions for reference (to detect relative heel position)
+      const leftHipY = lm[LM.LEFT_HIP].y;
+      const rightHipY = lm[LM.RIGHT_HIP].y;
+      
       if (prevLandmarks) {
         const prevLeftHeelY = prevLandmarks[LM.LEFT_HEEL].y;
         const prevRightHeelY = prevLandmarks[LM.RIGHT_HEEL].y;
-        if (leftHeelY > prevLeftHeelY && leftHeelY > 0.85 && timestamp - lastHeelStrikeTime > 300) {
+        
+        // Heel strike detection:
+        // 1. Heel moving down (Y increasing)
+        // 2. Heel below hip level (Y > hipY)
+        // 3. Minimum time between heel strikes (300ms)
+        const leftHeelDown = leftHeelY > prevLeftHeelY;
+        const rightHeelDown = rightHeelY > prevRightHeelY;
+        const leftHeelLow = leftHeelY > leftHipY + 0.3; // Below hip + threshold
+        const rightHeelLow = rightHeelY > rightHipY + 0.3;
+        
+        if (leftHeelDown && leftHeelLow && timestamp - lastHeelStrikeTime > 300) {
           lastHeelStrikeTime = timestamp;
           stepCount++;
           return { type: 'left_heel_strike', timestamp };
         }
-        if (rightHeelY > prevRightHeelY && rightHeelY > 0.85 && timestamp - lastHeelStrikeTime > 300) {
+        if (rightHeelDown && rightHeelLow && timestamp - lastHeelStrikeTime > 300) {
           lastHeelStrikeTime = timestamp;
           stepCount++;
           return { type: 'right_heel_strike', timestamp };
@@ -944,6 +1005,12 @@
       }
       lastChartUpdateTime = now;
 
+      // Validate dataPoint
+      if (!dataPoint || typeof dataPoint !== 'object') {
+        console.warn('[Chart] Invalid dataPoint:', dataPoint);
+        return;
+      }
+
       // Chart.js realtime scale expects epoch-like timestamps (ms).
       // In video mode we convert video time -> epoch by adding a base offset.
       const videoTimeMs = (videoFileUrl && videoElement && !isNaN(videoElement.currentTime))
@@ -953,25 +1020,42 @@
         ? (videoEpochBaseMs + videoTimeMs)
         : now;
 
-      if (charts.speed) charts.speed.data.datasets[0].data.push({ x: xValue, y: dataPoint.speed });
-      if (charts.cadence) charts.cadence.data.datasets[0].data.push({ x: xValue, y: dataPoint.cadence });
-      if (charts.symmetry) charts.symmetry.data.datasets[0].data.push({ x: xValue, y: dataPoint.symmetry });
-      if (charts.trunk) charts.trunk.data.datasets[0].data.push({ x: xValue, y: dataPoint.trunk });
+      // Helper to safely add data point
+      const safeAdd = (chart, datasetIndex, value) => {
+        if (chart && chart.data.datasets[datasetIndex]) {
+          const safeValue = (typeof value === 'number' && isFinite(value)) ? value : 0;
+          chart.data.datasets[datasetIndex].data.push({ x: xValue, y: safeValue });
+        }
+      };
+
+      safeAdd(charts.speed, 0, dataPoint.speed);
+      safeAdd(charts.cadence, 0, dataPoint.cadence);
+      safeAdd(charts.symmetry, 0, dataPoint.symmetry);
+      safeAdd(charts.trunk, 0, dataPoint.trunk);
+      safeAdd(charts.pelvis, 0, dataPoint.pelvis);
+      
       if (charts.knee) {
-        charts.knee.data.datasets[0].data.push({ x: xValue, y: dataPoint.leftKnee });
-        charts.knee.data.datasets[1].data.push({ x: xValue, y: dataPoint.rightKnee });
+        safeAdd(charts.knee, 0, dataPoint.leftKnee);
+        safeAdd(charts.knee, 1, dataPoint.rightKnee);
       }
       if (charts.hip) {
-        charts.hip.data.datasets[0].data.push({ x: xValue, y: dataPoint.leftHip });
-        charts.hip.data.datasets[1].data.push({ x: xValue, y: dataPoint.rightHip });
+        safeAdd(charts.hip, 0, dataPoint.leftHip);
+        safeAdd(charts.hip, 1, dataPoint.rightHip);
       }
       if (charts.ankle) {
-        charts.ankle.data.datasets[0].data.push({ x: xValue, y: dataPoint.leftAnkle });
-        charts.ankle.data.datasets[1].data.push({ x: xValue, y: dataPoint.rightAnkle });
+        safeAdd(charts.ankle, 0, dataPoint.leftAnkle);
+        safeAdd(charts.ankle, 1, dataPoint.rightAnkle);
       }
-      if (charts.pelvis) charts.pelvis.data.datasets[0].data.push({ x: xValue, y: dataPoint.pelvis });
 
-      Object.values(charts).forEach(chart => chart.update('quiet'));
+      Object.values(charts).forEach(chart => {
+        if (chart) {
+          try {
+            chart.update('quiet');
+          } catch (e) {
+            console.warn('[Chart] Update error:', e);
+          }
+        }
+      });
     }
 
     
@@ -1021,17 +1105,17 @@
                   // Preview values (cadence is omitted in preview)
                   const previewData = {
                     timestamp: Date.now(),
-                    speed: speed,
+                    speed: isFinite(speed) ? Math.max(0, speed) : 0,
                     cadence: 0,
                     symmetry: angles ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee) : 100,
-                    trunk: trunkAngle,
-                    pelvis: pelvicTilt,
-                    leftKnee: angles ? angles.leftKnee : 0,
-                    rightKnee: angles ? angles.rightKnee : 0,
-                    leftHip: angles ? angles.leftHip : 0,
-                    rightHip: angles ? angles.rightHip : 0,
-                    leftAnkle: angles ? angles.leftAnkle : 0,
-                    rightAnkle: angles ? angles.rightAnkle : 0
+                    trunk: isFinite(trunkAngle) ? Math.max(0, trunkAngle) : 0,
+                    pelvis: isFinite(pelvicTilt) ? Math.max(0, pelvicTilt) : 0,
+                    leftKnee: angles && isFinite(angles.leftKnee) ? angles.leftKnee : 0,
+                    rightKnee: angles && isFinite(angles.rightKnee) ? angles.rightKnee : 0,
+                    leftHip: angles && isFinite(angles.leftHip) ? angles.leftHip : 0,
+                    rightHip: angles && isFinite(angles.rightHip) ? angles.rightHip : 0,
+                    leftAnkle: angles && isFinite(angles.leftAnkle) ? angles.leftAnkle : 0,
+                    rightAnkle: angles && isFinite(angles.rightAnkle) ? angles.rightAnkle : 0
                   };
 
                   updateCharts(previewData);
@@ -1524,11 +1608,26 @@
 
             // Use MediaPipe/video time axis for gait event timing (independent of playbackRate)
             const gaitEvent = detectGaitEvents(landmarks, mpTimestamp);
-            if (gaitEvent) gaitEvents.push(gaitEvent);
+            if (gaitEvent) {
+              gaitEvents.push(gaitEvent);
+              console.log('[Gait Event]', gaitEvent.type, 'at', (mpTimestamp / 1000).toFixed(2), 's');
+            }
 
-            const timeWindow = 10000;
+            // Calculate cadence from recent heel strikes
+            const timeWindow = 10000; // 10 seconds
             const recentEvents = gaitEvents.filter(e => (mpTimestamp - e.timestamp) < timeWindow);
-            const cadence = (recentEvents.length / timeWindow) * 60000;
+            
+            // Cadence = (number of steps / time window in seconds) * 60
+            // More stable calculation: only calculate if we have enough events
+            let cadence = 0;
+            if (recentEvents.length >= 2) {
+              cadence = (recentEvents.length / (timeWindow / 1000)) * 60;
+            }
+            
+            // Sanity check: cadence should be 0-200 steps/min
+            if (isNaN(cadence) || cadence < 0 || cadence > 200) {
+              cadence = 0;
+            }
 
             if (angles) {
               emaValues.leftKnee = ema(emaValues.leftKnee, angles.leftKnee);
@@ -1550,17 +1649,17 @@
               landmarks,
               worldLandmarks,
               angles,
-              speed: emaValues.speed,
-              cadence: emaValues.cadence,
-              symmetry: kneeSymmetry,
-              trunk: emaValues.trunk,
-              pelvis: emaValues.pelvis,
-              leftKnee: emaValues.leftKnee,
-              rightKnee: emaValues.rightKnee,
-              leftHip: emaValues.leftHip,
-              rightHip: emaValues.rightHip,
-              leftAnkle: emaValues.leftAnkle,
-              rightAnkle: emaValues.rightAnkle
+              speed: isFinite(emaValues.speed) ? Math.max(0, emaValues.speed) : 0,
+              cadence: isFinite(emaValues.cadence) ? Math.max(0, Math.min(200, emaValues.cadence)) : 0,
+              symmetry: isFinite(kneeSymmetry) ? Math.max(0, Math.min(100, kneeSymmetry)) : 100,
+              trunk: isFinite(emaValues.trunk) ? Math.max(0, Math.min(45, emaValues.trunk)) : 0,
+              pelvis: isFinite(emaValues.pelvis) ? Math.max(0, Math.min(30, emaValues.pelvis)) : 0,
+              leftKnee: isFinite(emaValues.leftKnee) ? Math.max(0, Math.min(180, emaValues.leftKnee)) : 0,
+              rightKnee: isFinite(emaValues.rightKnee) ? Math.max(0, Math.min(180, emaValues.rightKnee)) : 0,
+              leftHip: isFinite(emaValues.leftHip) ? Math.max(0, Math.min(180, emaValues.leftHip)) : 0,
+              rightHip: isFinite(emaValues.rightHip) ? Math.max(0, Math.min(180, emaValues.rightHip)) : 0,
+              leftAnkle: isFinite(emaValues.leftAnkle) ? Math.max(0, Math.min(180, emaValues.leftAnkle)) : 0,
+              rightAnkle: isFinite(emaValues.rightAnkle) ? Math.max(0, Math.min(180, emaValues.rightAnkle)) : 0
             };
 
             analysisData.push(dataPoint);
