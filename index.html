@@ -337,6 +337,7 @@
     let currentPlane = 'frontal';
     let isAnalyzing = false;
     let isRecording = false;
+    let isLoadingVideo = false; // Prevent concurrent video loads
     let mediaStream = null;
     let mediaRecorder = null;
     let recordedChunks = [];
@@ -1145,6 +1146,13 @@
     }
     
     async function loadVideoFile() {
+      // Prevent concurrent loads
+      if (isLoadingVideo) {
+        console.warn('[Video] Already loading a video, please wait...');
+        showNotification('動画を読み込み中です。少々お待ちください。', 'warning');
+        return;
+      }
+
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'video/*';
@@ -1153,8 +1161,11 @@
         const file = e.target.files[0];
         if (!file) return;
 
+        isLoadingVideo = true;
+
         try {
           console.log('[Video] Loading:', file.name, (file.size / (1024*1024)).toFixed(2), 'MB');
+          showNotification('動画を読み込み中...', 'info');
 
           // Cleanup
           isAnalyzing = false;
@@ -1180,27 +1191,40 @@
           }
 
           pauseCharts();
-          releaseCamera();
+          
+          // Release camera if active
+          if (mediaStream) {
+            releaseCamera();
+          }
 
-          // Clean video element
+          // Clean video element more thoroughly
           videoElement.onloadedmetadata = null;
           videoElement.onloadeddata = null;
           videoElement.oncanplay = null;
+          videoElement.oncanplaythrough = null;
           videoElement.onerror = null;
           videoElement.onended = null;
 
           if (videoFileUrl) {
-            URL.revokeObjectURL(videoFileUrl);
+            try {
+              URL.revokeObjectURL(videoFileUrl);
+            } catch (_) {}
             videoFileUrl = null;
           }
 
-          videoElement.pause();
-          videoElement.currentTime = 0;
-          videoElement.removeAttribute('src');
-          videoElement.srcObject = null;
-          videoElement.load();
+          // Ensure video is fully released
+          try {
+            videoElement.pause();
+            videoElement.currentTime = 0;
+            videoElement.removeAttribute('src');
+            videoElement.srcObject = null;
+            videoElement.load();
+          } catch (e) {
+            console.warn('[Video] Cleanup warning:', e);
+          }
 
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Wait longer for cleanup to complete
+          await new Promise(resolve => setTimeout(resolve, 300));
 
           // Load new video
           videoFileUrl = URL.createObjectURL(file);
@@ -1292,7 +1316,9 @@
           showNotification('動画読み込みエラー: ' + error.message, 'error');
 
           if (videoFileUrl) {
-            URL.revokeObjectURL(videoFileUrl);
+            try {
+              URL.revokeObjectURL(videoFileUrl);
+            } catch (_) {}
             videoFileUrl = null;
           }
           videoEpochBaseMs = null;
@@ -1302,6 +1328,9 @@
           const recordBtn = document.getElementById('btn-record');
           recordBtn.disabled = true;
           recordBtn.textContent = '▶ 開始';
+        } finally {
+          // Always reset loading flag
+          isLoadingVideo = false;
         }
       };
 
