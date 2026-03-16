@@ -1835,7 +1835,7 @@
     
     function stopRecording() {
       if (mediaRecorder && isRecording) {
-        console.log('Stopping recording...');
+        console.log('[Recording] Stopping recording...');
         mediaRecorder.stop();
         isRecording = false;
         
@@ -1853,17 +1853,25 @@
         
         // Update button UI (restore based on mode)
         const recordBtn = document.getElementById('btn-record');
-        if (videoElement.src && !videoElement.srcObject) {
+        if (videoFileUrl) {
           // Video mode
           recordBtn.textContent = '▶ 開始';
-          recordBtn.classList.remove('btn-secondary');
+          recordBtn.classList.remove('btn-danger', 'btn-secondary');
           recordBtn.classList.add('btn-primary');
-        } else {
+        } else if (videoElement.srcObject) {
           // Camera mode
           recordBtn.textContent = '⏺ 録画';
-          recordBtn.classList.remove('btn-secondary');
+          recordBtn.classList.remove('btn-primary', 'btn-secondary');
+          recordBtn.classList.add('btn-danger');
+        } else {
+          // Neither - disable
+          recordBtn.disabled = true;
+          recordBtn.textContent = '⏺ 録画';
+          recordBtn.classList.remove('btn-primary', 'btn-danger', 'btn-secondary');
           recordBtn.classList.add('btn-danger');
         }
+        
+        console.log('[Recording] Stopped successfully');
       }
     }
     
