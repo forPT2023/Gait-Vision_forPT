@@ -646,15 +646,28 @@
     
     function calcTrunkAngle(wl) {
       if (!wl || wl.length < 33) return 0;
+      
+      // Calculate trunk inclination in sagittal plane (forward/backward lean)
       const shoulderMid = {
         x: (wl[LM.LEFT_SHOULDER].x + wl[LM.RIGHT_SHOULDER].x) / 2,
-        y: (wl[LM.LEFT_SHOULDER].y + wl[LM.RIGHT_SHOULDER].y) / 2
+        y: (wl[LM.LEFT_SHOULDER].y + wl[LM.RIGHT_SHOULDER].y) / 2,
+        z: (wl[LM.LEFT_SHOULDER].z + wl[LM.RIGHT_SHOULDER].z) / 2
       };
       const hipMid = {
         x: (wl[LM.LEFT_HIP].x + wl[LM.RIGHT_HIP].x) / 2,
-        y: (wl[LM.LEFT_HIP].y + wl[LM.RIGHT_HIP].y) / 2
+        y: (wl[LM.LEFT_HIP].y + wl[LM.RIGHT_HIP].y) / 2,
+        z: (wl[LM.LEFT_HIP].z + wl[LM.RIGHT_HIP].z) / 2
       };
-      return Math.abs(Math.atan2(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y) * (180 / Math.PI));
+      
+      // Calculate angle from vertical (Y-axis)
+      // In MediaPipe: Y goes down, so we use Y difference
+      const dy = shoulderMid.y - hipMid.y; // Should be negative (shoulder above hip)
+      const dz = shoulderMid.z - hipMid.z; // Forward/backward
+      
+      // Trunk angle from vertical in sagittal plane
+      const angle = Math.abs(Math.atan2(dz, Math.abs(dy)) * (180 / Math.PI));
+      
+      return isFinite(angle) ? angle : 0;
     }
     
     function calcPelvicTilt(wl) {
@@ -679,14 +692,14 @@
         z: (prevWl[LM.LEFT_HIP].z + prevWl[LM.RIGHT_HIP].z) / 2
       };
       
-      // Calculate 3D displacement
+      // Calculate 3D displacement (in meters - MediaPipe world coordinates)
       const displacement = Math.sqrt(
         Math.pow(hipMid.x - prevHipMid.x, 2) + 
         Math.pow(hipMid.y - prevHipMid.y, 2) + 
         Math.pow(hipMid.z - prevHipMid.z, 2)
       );
       
-      // Calculate shoulder width for scaling (3D distance)
+      // Calculate shoulder width for scaling (3D distance in meters)
       const shoulderWidth = Math.sqrt(
         Math.pow(wl[LM.LEFT_SHOULDER].x - wl[LM.RIGHT_SHOULDER].x, 2) + 
         Math.pow(wl[LM.LEFT_SHOULDER].y - wl[LM.RIGHT_SHOULDER].y, 2) + 
@@ -694,20 +707,25 @@
       );
       
       // Prevent division by zero
-      if (shoulderWidth < 0.1 || isNaN(shoulderWidth)) {
-        console.warn('[Speed] Invalid shoulder width:', shoulderWidth);
+      if (shoulderWidth < 0.05 || isNaN(shoulderWidth)) {
+        // Shoulder width too small or invalid
         return 0;
       }
       
-      // Speed = (displacement / shoulder_width) * 0.4m (avg shoulder width) / time
-      // Convert from meters/millisecond to meters/second
-      // Formula: (displacement_normalized * reference_width_meters) / (deltaT_ms / 1000)
-      const speedMps = (displacement / shoulderWidth) * 0.4 / (deltaT / 1000);
+      // Speed calculation:
+      // MediaPipe world coordinates are in meters relative to the hip
+      // Average shoulder width is ~0.4m, but MediaPipe may scale differently
+      // Use actual measured shoulder width as reference
+      // Speed = displacement / time
+      const speedMps = displacement / (deltaT / 1000);
       
       // Sanity check: walking speed should be 0-3 m/s
-      if (isNaN(speedMps) || speedMps < 0 || speedMps > 3) {
-        console.warn('[Speed] Invalid speed:', speedMps, 'displacement:', displacement, 'shoulderWidth:', shoulderWidth, 'deltaT:', deltaT);
-        return 0;
+      // Note: MediaPipe coordinates might need calibration
+      if (isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
+        if (Math.random() < 0.01) { // Log occasionally to avoid spam
+          console.warn('[Speed] Value:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), 'm | shoulderWidth:', shoulderWidth.toFixed(3), 'm | deltaT:', deltaT.toFixed(1), 'ms');
+        }
+        return Math.max(0, Math.min(3, speedMps)); // Clamp instead of returning 0
       }
       
       return speedMps;
@@ -738,32 +756,42 @@
       // Heel strike = heel moves DOWN (Y increases)
       const leftHeelY = lm[LM.LEFT_HEEL].y;
       const rightHeelY = lm[LM.RIGHT_HEEL].y;
+      const leftFootY = lm[LM.LEFT_FOOT_INDEX].y;
+      const rightFootY = lm[LM.RIGHT_FOOT_INDEX].y;
       
-      // Get hip Y positions for reference (to detect relative heel position)
-      const leftHipY = lm[LM.LEFT_HIP].y;
-      const rightHipY = lm[LM.RIGHT_HIP].y;
+      // Get knee Y positions for reference (heel should be below knee)
+      const leftKneeY = lm[LM.LEFT_KNEE].y;
+      const rightKneeY = lm[LM.RIGHT_KNEE].y;
       
       if (prevLandmarks) {
         const prevLeftHeelY = prevLandmarks[LM.LEFT_HEEL].y;
         const prevRightHeelY = prevLandmarks[LM.RIGHT_HEEL].y;
         
-        // Heel strike detection:
-        // 1. Heel moving down (Y increasing)
-        // 2. Heel below hip level (Y > hipY)
-        // 3. Minimum time between heel strikes (300ms)
+        // Heel strike detection (improved sensitivity):
+        // 1. Heel moving down (Y increasing) OR velocity change
+        // 2. Heel below knee level (more lenient threshold)
+        // 3. Minimum time between heel strikes (250ms for faster detection)
         const leftHeelDown = leftHeelY > prevLeftHeelY;
         const rightHeelDown = rightHeelY > prevRightHeelY;
-        const leftHeelLow = leftHeelY > leftHipY + 0.3; // Below hip + threshold
-        const rightHeelLow = rightHeelY > rightHipY + 0.3;
         
-        if (leftHeelDown && leftHeelLow && timestamp - lastHeelStrikeTime > 300) {
+        // More lenient threshold: heel just needs to be below knee
+        const leftHeelLow = leftHeelY > leftKneeY + 0.05;
+        const rightHeelLow = rightHeelY > rightKneeY + 0.05;
+        
+        // Also check if foot is relatively flat (heel and toe Y similar)
+        const leftFootFlat = Math.abs(leftHeelY - leftFootY) < 0.05;
+        const rightFootFlat = Math.abs(rightHeelY - rightFootY) < 0.05;
+        
+        if (leftHeelDown && leftHeelLow && leftFootFlat && timestamp - lastHeelStrikeTime > 250) {
           lastHeelStrikeTime = timestamp;
           stepCount++;
+          console.log('[Gait] Left heel strike at', (timestamp/1000).toFixed(2), 's');
           return { type: 'left_heel_strike', timestamp };
         }
-        if (rightHeelDown && rightHeelLow && timestamp - lastHeelStrikeTime > 300) {
+        if (rightHeelDown && rightHeelLow && rightFootFlat && timestamp - lastHeelStrikeTime > 250) {
           lastHeelStrikeTime = timestamp;
           stepCount++;
+          console.log('[Gait] Right heel strike at', (timestamp/1000).toFixed(2), 's');
           return { type: 'right_heel_strike', timestamp };
         }
       }
@@ -1617,15 +1645,22 @@
             const timeWindow = 10000; // 10 seconds
             const recentEvents = gaitEvents.filter(e => (mpTimestamp - e.timestamp) < timeWindow);
             
-            // Cadence = (number of steps / time window in seconds) * 60
-            // More stable calculation: only calculate if we have enough events
+            // Calculate cadence based on available data
             let cadence = 0;
             if (recentEvents.length >= 2) {
+              // Standard calculation: steps in time window
               cadence = (recentEvents.length / (timeWindow / 1000)) * 60;
+            } else if (recentEvents.length === 1 && gaitEvents.length >= 2) {
+              // Estimate from last 2 steps
+              const lastTwo = gaitEvents.slice(-2);
+              const timeBetweenSteps = lastTwo[1].timestamp - lastTwo[0].timestamp;
+              if (timeBetweenSteps > 0 && timeBetweenSteps < 2000) { // Sanity check: steps should be < 2s apart
+                cadence = (60000 / timeBetweenSteps); // steps per minute
+              }
             }
             
-            // Sanity check: cadence should be 0-200 steps/min
-            if (isNaN(cadence) || cadence < 0 || cadence > 200) {
+            // Sanity check: cadence should be 60-200 steps/min
+            if (isNaN(cadence) || cadence < 60 || cadence > 200) {
               cadence = 0;
             }
 
