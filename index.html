@@ -1064,9 +1064,14 @@
     // Camera
     async function startCamera() {
       try {
-        // Reinitialize MediaPipe to reset timestamp tracking
-        console.log('[Camera] Reinitializing MediaPipe for camera mode...');
-        await initPoseLandmarker();
+        // Initialize or reinitialize MediaPipe to reset timestamp tracking
+        if (!poseLandmarker) {
+          console.log('[Camera] Initializing MediaPipe for first time...');
+          await initPoseLandmarker();
+        } else {
+          console.log('[Camera] Reinitializing MediaPipe for camera mode...');
+          await initPoseLandmarker();
+        }
         
         const constraints = [
           { video: { facingMode: 'user', aspectRatio: { ideal: window.innerHeight > window.innerWidth ? 9/16 : 16/9 }, frameRate: { ideal: 30, max: 30 } } },
@@ -1281,9 +1286,14 @@
             }
           };
 
-          // Reinitialize MediaPipe to reset timestamp tracking
-          console.log('[Video] Reinitializing MediaPipe for video mode...');
-          await initPoseLandmarker();
+          // Initialize or reinitialize MediaPipe to reset timestamp tracking
+          if (!poseLandmarker) {
+            console.log('[Video] Initializing MediaPipe for first time...');
+            await initPoseLandmarker();
+          } else {
+            console.log('[Video] Reinitializing MediaPipe for video mode...');
+            await initPoseLandmarker();
+          }
 
           // Draw first frame
           resizeCanvas();
