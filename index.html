@@ -760,7 +760,11 @@
     async function initPoseLandmarker() {
       try {
         if (poseLandmarker) {
-          await poseLandmarker.close();
+          try {
+            await poseLandmarker.close();
+          } catch (e) {
+            console.warn('[MediaPipe] Error closing previous instance:', e);
+          }
           poseLandmarker = null;
         }
 
@@ -787,10 +791,10 @@
           poseLandmarker = await create('CPU');
         }
 
-        console.log('MediaPipe initialized');
+        console.log('[MediaPipe] Initialized successfully');
         showNotification('MediaPipe初期化完了', 'success');
       } catch (error) {
-        console.error('MediaPipe error:', error);
+        console.error('[MediaPipe] Initialization error:', error);
         showNotification('MediaPipeの初期化に失敗しました。ページを再読み込みしてください。', 'error');
       }
     }
@@ -1037,7 +1041,12 @@
                 previewPrevMpTimestamp = mpTimestamp;
               }
             } catch (error) {
-              console.error('Preview detection error:', error);
+              // Log error but continue preview
+              if (error.message && error.message.includes('timestamp')) {
+                console.warn('[Preview] Timestamp error (will recover):', error.message);
+              } else {
+                console.error('[Preview] Detection error:', error);
+              }
             }
           }
         }
@@ -1054,11 +1063,9 @@
     // Camera
     async function startCamera() {
       try {
-        // Keep VIDEO runningMode and use detectForVideo() for camera frames
-        // (avoids runningMode/method mismatch across browsers)
-        if (poseLandmarker) {
-          await poseLandmarker.setOptions({ runningMode: 'VIDEO' });
-        }
+        // Reinitialize MediaPipe to reset timestamp tracking
+        console.log('[Camera] Reinitializing MediaPipe for camera mode...');
+        await initPoseLandmarker();
         
         const constraints = [
           { video: { facingMode: 'user', aspectRatio: { ideal: window.innerHeight > window.innerWidth ? 9/16 : 16/9 }, frameRate: { ideal: 30, max: 30 } } },
@@ -1250,10 +1257,9 @@
             }
           };
 
-          // Switch to VIDEO mode
-          if (poseLandmarker) {
-            await poseLandmarker.setOptions({ runningMode: 'VIDEO' });
-          }
+          // Reinitialize MediaPipe to reset timestamp tracking
+          console.log('[Video] Reinitializing MediaPipe for video mode...');
+          await initPoseLandmarker();
 
           // Draw first frame
           resizeCanvas();
@@ -1530,7 +1536,11 @@
           scheduleNext();
 
         } catch (error) {
-          console.error('[Analysis] Error:', error);
+          if (error.message && error.message.includes('timestamp')) {
+            console.warn('[Analysis] Timestamp error (skipping frame):', error.message);
+          } else {
+            console.error('[Analysis] Error:', error);
+          }
           scheduleNext();
         }
       }
