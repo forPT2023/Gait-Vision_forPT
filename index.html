@@ -645,7 +645,10 @@
     }
     
     function calcTrunkAngle(wl) {
-      if (!wl || wl.length < 33) return 0;
+      if (!wl || wl.length < 33) {
+        console.warn('[Trunk] Invalid world landmarks (length:', wl ? wl.length : 'null', ')');
+        return 0;
+      }
       
       // Calculate trunk inclination in sagittal plane (forward/backward lean)
       const shoulderMid = {
@@ -666,6 +669,11 @@
       
       // Trunk angle from vertical in sagittal plane
       const angle = Math.abs(Math.atan2(dz, Math.abs(dy)) * (180 / Math.PI));
+      
+      // Debug log (1% sampling)
+      if (Math.random() < 0.01) {
+        console.log('[Trunk] dy:', dy.toFixed(4), 'dz:', dz.toFixed(4), 'angle:', angle.toFixed(2), '°');
+      }
       
       return isFinite(angle) ? angle : 0;
     }
@@ -719,12 +727,15 @@
       // Speed = displacement / time
       const speedMps = displacement / (deltaT / 1000);
       
+      // Debug log (1% sampling)
+      if (Math.random() < 0.01) {
+        console.log('[Speed] displacement:', displacement.toFixed(5), 'm | shoulderWidth:', shoulderWidth.toFixed(3), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
+      }
+      
       // Sanity check: walking speed should be 0-3 m/s
       // Note: MediaPipe coordinates might need calibration
       if (isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
-        if (Math.random() < 0.01) { // Log occasionally to avoid spam
-          console.warn('[Speed] Value:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), 'm | shoulderWidth:', shoulderWidth.toFixed(3), 'm | deltaT:', deltaT.toFixed(1), 'ms');
-        }
+        console.warn('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), 'm | shoulderWidth:', shoulderWidth.toFixed(3), 'm | deltaT:', deltaT.toFixed(1), 'ms');
         return Math.max(0, Math.min(3, speedMps)); // Clamp instead of returning 0
       }
       
@@ -1145,6 +1156,11 @@
                     leftAnkle: angles && isFinite(angles.leftAnkle) ? angles.leftAnkle : 0,
                     rightAnkle: angles && isFinite(angles.rightAnkle) ? angles.rightAnkle : 0
                   };
+                  
+                  // Debug log (every 30 frames)
+                  if ((Math.floor(mpTimestamp / 33)) % 30 === 0) {
+                    console.log('[Preview] Speed:', speed.toFixed(3), 'm/s | Trunk:', trunkAngle.toFixed(2), '\u00b0 | deltaT:', deltaT.toFixed(1), 'ms');
+                  }
 
                   updateCharts(previewData);
                 }
@@ -1698,6 +1714,12 @@
             };
 
             analysisData.push(dataPoint);
+            
+            // Debug log every 30 frames (~1 second at 30fps)
+            if (analysisData.length % 30 === 0) {
+              console.log('[Analysis] Frame:', analysisData.length, '| Speed:', dataPoint.speed.toFixed(3), 'm/s | Trunk:', dataPoint.trunk.toFixed(2), '\u00b0 | Cadence:', dataPoint.cadence.toFixed(1), 'spm');
+            }
+            
             updateCharts(dataPoint);
 
             prevLandmarks = landmarks;
