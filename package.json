@@ -1,0 +1,14 @@
+{
+  "name": "gait-vision-forpt",
+  "version": "3.10.3",
+  "description": "歩行分析PWAアプリケーション - MediaPipe Pose Landmarkerを使用したリアルタイム歩行分析",
+  "type": "module",
+  "scripts": {
+    "dev": "python3 -m http.server 3000",
+    "start": "python3 -m http.server 3000",
+    "clean-port": "fuser -k 3000/tcp 2>/dev/null || true"
+  },
+  "keywords": ["gait", "analysis", "mediapipe", "pwa", "physical-therapy"],
+  "author": "",
+  "license": "MIT"
+}
