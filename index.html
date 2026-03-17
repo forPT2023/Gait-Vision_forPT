@@ -1334,7 +1334,7 @@
             releaseCamera();
           }
 
-          // Clean video element more thoroughly
+          // Clean video element event handlers
           videoElement.onloadedmetadata = null;
           videoElement.onloadeddata = null;
           videoElement.oncanplay = null;
@@ -1342,6 +1342,7 @@
           videoElement.onerror = null;
           videoElement.onended = null;
 
+          // Revoke old video URL
           if (videoFileUrl) {
             try {
               URL.revokeObjectURL(videoFileUrl);
@@ -1349,7 +1350,7 @@
             videoFileUrl = null;
           }
 
-          // Ensure video is fully released
+          // Reset video element
           try {
             videoElement.pause();
             videoElement.currentTime = 0;
@@ -1360,10 +1361,7 @@
             console.warn('[Video] Cleanup warning:', e);
           }
 
-          // Wait longer for cleanup to complete
-          await new Promise(resolve => setTimeout(resolve, 300));
-
-          // Load new video
+          // Create new video URL
           videoFileUrl = URL.createObjectURL(file);
           videoEpochBaseMs = null;
 
@@ -1514,7 +1512,7 @@
         previewAnimationId = null;
       }
 
-      // If a previous video frame callback is alive, cancel it
+      // Cancel any existing video frame callback
       if (videoFrameCallbackHandle && videoElement.cancelVideoFrameCallback) {
         try {
           videoElement.cancelVideoFrameCallback(videoFrameCallbackHandle);
@@ -1522,47 +1520,30 @@
         videoFrameCallbackHandle = null;
       }
 
-      // For video files: start playback
+      // For video files: start playback (SIMPLIFIED)
       if (videoFileUrl) {
-        console.log('[Analysis] Starting video playback...');
-
-        // Reset video to beginning
-        try {
-          videoElement.currentTime = 0;
-        } catch (_) {}
-
-        // If video has ended, reload
+        console.log('[Analysis] Video mode - starting playback');
+        
+        videoElement.currentTime = 0;
+        
+        // If video ended, reload it
         if (videoElement.ended) {
-          console.log('[Analysis] Video was ended, calling load()');
+          console.log('[Analysis] Reloading ended video');
           videoElement.load();
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-
+        
         try {
           await videoElement.play();
-          console.log('[Analysis] Video play() called');
-
-          // Wait a short time for readyState / playback
-          let startWait = Date.now();
-          while ((videoElement.readyState < 2 || videoElement.paused) && (Date.now() - startWait) < 2000) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-          }
-
-          if (videoElement.readyState < 2) {
-            console.error('[Analysis] Video not ready (readyState < 2)');
-            showNotification('動画の準備ができていません', 'error');
-            return false;
-          }
-
-          // Base for chart x-axis in video mode (epoch-like ms)
-          videoEpochBaseMs = Date.now() - (videoElement.currentTime * 1000);
-
-          console.log('[Analysis] Video playback started, currentTime:', videoElement.currentTime.toFixed(3), 's');
+          console.log('[Analysis] Video play() succeeded');
         } catch (e) {
-          console.error('[Analysis] Play error:', e);
+          console.error('[Analysis] Video play() failed:', e);
           showNotification('動画の再生に失敗しました', 'error');
           return false;
         }
+        
+        // Set epoch base for chart x-axis
+        videoEpochBaseMs = Date.now();
       } else {
         videoEpochBaseMs = null;
       }
@@ -1572,7 +1553,7 @@
       analysisData = [];
       prevLandmarks = null;
       prevWorldLandmarks = null;
-      prevTimestamp = null; // store previous MediaPipe timestamp (ms)
+      prevTimestamp = null;
       gaitEvents = [];
       stepCount = 0;
       lastHeelStrikeTime = 0;
@@ -1580,7 +1561,7 @@
 
       // Start charts
       startCharts();
-      console.log('[Analysis] Charts started');
+      console.log('[Analysis] Analysis started successfully');
 
       // Update button for video mode
       if (videoFileUrl) {
@@ -1604,17 +1585,18 @@
 
       async function processFrame() {
         if (!isAnalyzing) {
-          console.log('[Analysis] Stopped by user');
+          console.log('[Analysis] Stopped');
           return;
         }
 
         try {
+          // Wait for video to be ready
           if (videoElement.readyState < 2) {
             scheduleNext();
             return;
           }
 
-          // For video mode: skip if paused (don't stop analysis)
+          // Skip paused frames (video mode only)
           if (videoFileUrl && videoElement.paused) {
             scheduleNext();
             return;
@@ -1624,7 +1606,7 @@
 
           const mpTimestamp = getMediaPipeTimestamp();
 
-          // Skip frame if timestamp hasn't increased (VIDEO mode requires monotonic timestamps)
+          // Ensure monotonic timestamps for video mode
           if (videoFileUrl && mpTimestamp <= lastMpTimestamp) {
             scheduleNext();
             return;
@@ -1634,7 +1616,7 @@
           const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
 
           if (frameCount % 30 === 0) {
-            console.log('[Analysis] Frame', frameCount, '| Time:', videoElement.currentTime.toFixed(2), 's');
+            console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
           }
 
           // Draw on canvas
