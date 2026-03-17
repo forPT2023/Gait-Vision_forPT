@@ -1283,6 +1283,8 @@
     }
     
     async function loadVideoFile() {
+      console.log('[Video] loadVideoFile() called');
+      
       // Prevent concurrent loads
       if (isLoadingVideo) {
         console.warn('[Video] Already loading a video, please wait...');
@@ -1293,12 +1295,19 @@
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'video/*';
+      
+      console.log('[Video] File input created, opening dialog...');
 
       input.onchange = async (e) => {
+        console.log('[Video] File selected');
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file) {
+          console.log('[Video] No file selected');
+          return;
+        }
 
         isLoadingVideo = true;
+        console.log('[Video] Starting load process for:', file.name);
 
         try {
           console.log('[Video] Loading:', file.name, (file.size / (1024*1024)).toFixed(2), 'MB');
@@ -1364,27 +1373,36 @@
           // Create new video URL
           videoFileUrl = URL.createObjectURL(file);
           videoEpochBaseMs = null;
+          console.log('[Video] Object URL created:', videoFileUrl.substring(0, 50) + '...');
 
           // iOS/Safari stability
           videoElement.playsInline = true;
           videoElement.setAttribute('playsinline', '');
           videoElement.preload = 'auto';
-          videoElement.muted = true; // allows reliable play() on some mobile browsers
+          videoElement.muted = true;
+          console.log('[Video] Video element configured');
 
           // Setup load handler (loadedmetadata can be unreliable -> fallback to canplay/loadeddata)
           await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Timeout')), 30000);
+            const timeout = setTimeout(() => {
+              console.error('[Video] Load timeout after 30 seconds');
+              reject(new Error('Timeout'));
+            }, 30000);
 
             const done = () => {
+              console.log('[Video] Load event triggered, checking dimensions...');
               if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
                 clearTimeout(timeout);
                 cleanup();
-                console.log('[Video] Loaded:', videoElement.videoWidth, 'x', videoElement.videoHeight);
+                console.log('[Video] ✅ Loaded successfully:', videoElement.videoWidth, 'x', videoElement.videoHeight);
                 resolve();
+              } else {
+                console.warn('[Video] Dimensions not ready yet:', videoElement.videoWidth, 'x', videoElement.videoHeight);
               }
             };
 
-            const onError = () => {
+            const onError = (e) => {
+              console.error('[Video] Load error:', e);
               clearTimeout(timeout);
               cleanup();
               reject(new Error('Load failed'));
@@ -1398,12 +1416,14 @@
               videoElement.removeEventListener('error', onError);
             };
 
+            console.log('[Video] Setting up event listeners...');
             videoElement.addEventListener('loadedmetadata', done);
             videoElement.addEventListener('loadeddata', done);
             videoElement.addEventListener('canplay', done);
             videoElement.addEventListener('canplaythrough', done);
             videoElement.addEventListener('error', onError);
 
+            console.log('[Video] Setting src and starting load...');
             videoElement.src = videoFileUrl;
             videoElement.loop = false;
           });
@@ -1425,20 +1445,16 @@
             await initPoseLandmarker();
           }
 
-          // Draw first frame
+          // Resize canvas and draw first frame
           resizeCanvas();
-
-          // Ensure frame is ready
-          let attempts = 0;
-          while (videoElement.readyState < 2 && attempts < 100) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-            attempts++;
-          }
-
+          
+          // Draw first frame if video is ready
           if (videoElement.readyState >= 2) {
-            resizeCanvas();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            console.log('[Video] First frame drawn');
+          } else {
+            console.log('[Video] Video not fully ready yet, first frame will be drawn on play');
           }
 
           // Update UI
@@ -1449,7 +1465,7 @@
           recordBtn.classList.add('btn-primary');
 
           showNotification('動画読み込み完了', 'success');
-          console.log('[Video] Ready');
+          console.log('[Video] Load complete - ready to start analysis');
 
         } catch (error) {
           console.error('[Video] Error:', error);
