@@ -863,19 +863,25 @@
     
     // MediaPipe initialization
     async function initPoseLandmarker() {
+      console.log('[MediaPipe] Initializing...');
       try {
         if (poseLandmarker) {
+          console.log('[MediaPipe] Closing previous instance...');
           try {
             await poseLandmarker.close();
+            console.log('[MediaPipe] Previous instance closed');
           } catch (e) {
             console.warn('[MediaPipe] Error closing previous instance:', e);
           }
           poseLandmarker = null;
         }
 
+        console.log('[MediaPipe] Loading vision tasks...');
         const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
+        console.log('[MediaPipe] Vision tasks loaded');
 
         const create = async (delegate) => {
+          console.log('[MediaPipe] Creating PoseLandmarker with', delegate, 'delegate...');
           return await PoseLandmarker.createFromOptions(vision, {
             baseOptions: {
               modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
@@ -891,15 +897,17 @@
 
         try {
           poseLandmarker = await create('GPU');
+          console.log('[MediaPipe] ✅ GPU delegate initialized');
         } catch (gpuErr) {
-          console.warn('[MediaPipe] GPU delegate failed, fallback to CPU:', gpuErr);
+          console.warn('[MediaPipe] ⚠️ GPU delegate failed, fallback to CPU:', gpuErr);
           poseLandmarker = await create('CPU');
+          console.log('[MediaPipe] ✅ CPU delegate initialized');
         }
 
-        console.log('[MediaPipe] Initialized successfully');
+        console.log('[MediaPipe] ✅ Initialization complete');
         showNotification('MediaPipe初期化完了', 'success');
       } catch (error) {
-        console.error('[MediaPipe] Initialization error:', error);
+        console.error('[MediaPipe] ❌ Initialization error:', error);
         showNotification('MediaPipeの初期化に失敗しました。ページを再読み込みしてください。', 'error');
       }
     }
@@ -1383,50 +1391,67 @@
           console.log('[Video] Video element configured');
 
           // Setup load handler (loadedmetadata can be unreliable -> fallback to canplay/loadeddata)
+          console.log('[Video] Waiting for video to load...');
           await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-              console.error('[Video] Load timeout after 30 seconds');
+              console.error('[Video] ❌ Load timeout after 30 seconds');
               reject(new Error('Timeout'));
             }, 30000);
 
-            const done = () => {
-              console.log('[Video] Load event triggered, checking dimensions...');
+            let resolved = false;
+            const done = (eventName) => {
+              if (resolved) {
+                console.log('[Video] Event', eventName, 'fired but already resolved');
+                return;
+              }
+              
+              console.log('[Video] Event fired:', eventName, '| readyState:', videoElement.readyState, '| dimensions:', videoElement.videoWidth, 'x', videoElement.videoHeight);
+              
               if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                resolved = true;
                 clearTimeout(timeout);
                 cleanup();
                 console.log('[Video] ✅ Loaded successfully:', videoElement.videoWidth, 'x', videoElement.videoHeight);
                 resolve();
               } else {
-                console.warn('[Video] Dimensions not ready yet:', videoElement.videoWidth, 'x', videoElement.videoHeight);
+                console.warn('[Video] ⚠️ Event', eventName, 'fired but dimensions not ready:', videoElement.videoWidth, 'x', videoElement.videoHeight);
               }
             };
 
             const onError = (e) => {
-              console.error('[Video] Load error:', e);
+              console.error('[Video] ❌ Load error:', e);
               clearTimeout(timeout);
               cleanup();
               reject(new Error('Load failed'));
             };
 
             const cleanup = () => {
-              videoElement.removeEventListener('loadedmetadata', done);
-              videoElement.removeEventListener('loadeddata', done);
-              videoElement.removeEventListener('canplay', done);
-              videoElement.removeEventListener('canplaythrough', done);
+              videoElement.removeEventListener('loadedmetadata', doneMetadata);
+              videoElement.removeEventListener('loadeddata', doneData);
+              videoElement.removeEventListener('canplay', doneCanplay);
+              videoElement.removeEventListener('canplaythrough', doneCanplaythrough);
               videoElement.removeEventListener('error', onError);
             };
 
+            const doneMetadata = () => done('loadedmetadata');
+            const doneData = () => done('loadeddata');
+            const doneCanplay = () => done('canplay');
+            const doneCanplaythrough = () => done('canplaythrough');
+
             console.log('[Video] Setting up event listeners...');
-            videoElement.addEventListener('loadedmetadata', done);
-            videoElement.addEventListener('loadeddata', done);
-            videoElement.addEventListener('canplay', done);
-            videoElement.addEventListener('canplaythrough', done);
+            videoElement.addEventListener('loadedmetadata', doneMetadata);
+            videoElement.addEventListener('loadeddata', doneData);
+            videoElement.addEventListener('canplay', doneCanplay);
+            videoElement.addEventListener('canplaythrough', doneCanplaythrough);
             videoElement.addEventListener('error', onError);
 
-            console.log('[Video] Setting src and starting load...');
+            console.log('[Video] Setting src to:', videoFileUrl.substring(0, 60) + '...');
             videoElement.src = videoFileUrl;
             videoElement.loop = false;
+            console.log('[Video] src set, waiting for load events...');
           });
+          
+          console.log('[Video] Promise resolved - video loaded');
 
           // Setup ended handler
           videoElement.onended = async () => {
@@ -1490,7 +1515,16 @@
         }
       };
 
-      input.click();
+      // CRITICAL: Must call click() synchronously in the same event loop
+      // Some browsers block programmatic click() if there's any async operation before it
+      console.log('[Video] Calling input.click()...');
+      try {
+        input.click();
+        console.log('[Video] input.click() called successfully');
+      } catch (e) {
+        console.error('[Video] ❌ Failed to trigger file dialog:', e);
+        showNotification('ファイル選択ダイアログを開けませんでした', 'error');
+      }
     }
 
     
