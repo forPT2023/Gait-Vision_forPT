@@ -1789,8 +1789,8 @@
             return;
           }
           
-          // Wait for canvas to render
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Brief wait for first frame to render (SIMPLIFIED)
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
         
         // Verify canvas has content
