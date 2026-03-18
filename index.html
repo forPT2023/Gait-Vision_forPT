@@ -239,6 +239,10 @@
         <span class="tooltiptext">分析・録画を開始（カメラ起動後に使用可能）</span>
       </div>
       <div class="tooltip">
+        <button id="btn-save-analyzed-video" class="btn-success" disabled>💾 解析動画</button>
+        <span class="tooltiptext">解析済み動画を保存（動画解析後に使用可能）</span>
+      </div>
+      <div class="tooltip">
         <button id="btn-csv" class="btn-secondary" disabled>📊 CSV</button>
         <span class="tooltiptext">分析データをCSV形式でエクスポート</span>
       </div>
@@ -1407,6 +1411,9 @@
           clearLoadedVideoState();
           videoElement.srcObject = null;
           videoElement.load();
+          
+          // Disable save analyzed video button when loading new video
+          document.getElementById('btn-save-analyzed-video').disabled = true;
 
           // Create new video URL
           videoFileUrl = URL.createObjectURL(file);
@@ -1488,6 +1495,12 @@
             if (isAnalyzing) {
               await finalizeSession();
               stopAllProcessing();
+              
+              // Enable save analyzed video button after analysis completes
+              if (videoFileUrl && analysisData.length > 0) {
+                document.getElementById('btn-save-analyzed-video').disabled = false;
+                showNotification('解析完了！解析動画を保存できます', 'success');
+              }
             }
           };
 
@@ -2050,6 +2063,83 @@
       recordedChunks = [];
       document.getElementById('save-recording-modal').classList.remove('show');
       showNotification('録画を破棄しました', 'info');
+    }
+
+    // Save analyzed video (for video file mode)
+    async function saveAnalyzedVideo() {
+      if (!videoFileUrl) {
+        showNotification('動画ファイルがありません', 'error');
+        return;
+      }
+
+      if (analysisData.length === 0) {
+        showNotification('解析データがありません。まず動画を解析してください。', 'error');
+        return;
+      }
+
+      try {
+        showNotification('解析動画を生成中...', 'info');
+        
+        // Get canvas stream for 1 second to capture frames
+        const stream = canvasElement.captureStream(30);
+        
+        // Select MIME type (MP4 preferred)
+        const mp4Types = ['video/mp4', 'video/mp4;codecs=h264', 'video/mp4;codecs=avc1'];
+        let mimeType = mp4Types.find(type => MediaRecorder.isTypeSupported(type));
+
+        if (!mimeType) {
+          mimeType = 'video/webm;codecs=vp9';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm';
+          }
+        }
+
+        const chunks = [];
+        const recorder = new MediaRecorder(stream, {
+          mimeType: mimeType,
+          videoBitsPerSecond: 2500000
+        });
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+
+          const date = new Date();
+          const dateStr = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0') + String(date.getDate()).padStart(2, '0');
+          const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+          a.download = `gait_analyzed_${patientId}_${dateStr}.${extension}`;
+
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+
+          showNotification('解析動画を保存しました', 'success');
+        };
+
+        // Reset video to beginning and replay with analysis
+        videoElement.currentTime = 0;
+        recorder.start();
+
+        // Wait for video to finish playing
+        await new Promise((resolve) => {
+          videoElement.onended = () => {
+            recorder.stop();
+            resolve();
+          };
+          videoElement.play();
+        });
+
+      } catch (error) {
+        console.error('[Save Analyzed Video] Error:', error);
+        showNotification('解析動画の保存に失敗しました: ' + error.message, 'error');
+      }
     }
 
     // Export CSV
@@ -2714,6 +2804,7 @@
 
     document.getElementById('btn-save-recording').addEventListener('click', saveRecordedVideo);
     document.getElementById('btn-discard-recording').addEventListener('click', discardRecordedVideo);
+    document.getElementById('btn-save-analyzed-video').addEventListener('click', saveAnalyzedVideo);
 
     document.getElementById('btn-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-report').addEventListener('click', generateReport);
