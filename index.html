@@ -2062,7 +2062,7 @@
       const BOM = '\uFEFF';
       let csv = BOM + 'elapsed_ms,speed_m_s,cadence_spm,symmetry_pct,trunk_deg,pelvis_deg,left_knee_deg,right_knee_deg,left_hip_deg,right_hip_deg,left_ankle_deg,right_ankle_deg\n';
       analysisData.forEach(data => {
-        csv += `${Math.round(data.elapsedMs || data.timestamp || 0)},${data.speed.toFixed(3)},${data.cadence.toFixed(1)},${data.symmetry.toFixed(1)},${data.trunk.toFixed(2)},${data.pelvis.toFixed(2)},${data.leftKnee.toFixed(2)},${data.rightKnee.toFixed(2)},${data.leftHip.toFixed(2)},${data.rightHip.toFixed(2)},${data.leftAnkle.toFixed(2)},${data.rightAnkle.toFixed(2)}\n`;
+        csv += `${Math.round(data.elapsedMs ?? data.timestamp ?? 0)},${data.speed.toFixed(3)},${data.cadence.toFixed(1)},${data.symmetry.toFixed(1)},${data.trunk.toFixed(2)},${data.pelvis.toFixed(2)},${data.leftKnee.toFixed(2)},${data.rightKnee.toFixed(2)},${data.leftHip.toFixed(2)},${data.rightHip.toFixed(2)},${data.leftAnkle.toFixed(2)},${data.rightAnkle.toFixed(2)}\n`;
       });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -2218,7 +2218,7 @@
         reportCharts.timeline = new Chart(timelineCtx, {
           type: 'line',
           data: {
-            labels: sampledData.map(d => (((d.elapsedMs || d.timestamp || 0) / 1000).toFixed(1) + 's')),
+            labels: sampledData.map(d => (((d.elapsedMs ?? d.timestamp ?? 0) / 1000).toFixed(1) + 's')),
             datasets: [
               {
                 label: '歩行速度 (m/s)',
@@ -2311,7 +2311,7 @@
       const avgLeftAnkle = averageMetric('leftAnkle', { excludeZero: true });
       const avgRightAnkle = averageMetric('rightAnkle', { excludeZero: true });
       const durationMs = analysisData.length > 0
-        ? Math.max(...analysisData.map(d => d.elapsedMs || d.timestamp || 0))
+        ? Math.max(...analysisData.map(d => d.elapsedMs ?? d.timestamp ?? 0))
         : 0;
 
       // Calculate max/min for ranges

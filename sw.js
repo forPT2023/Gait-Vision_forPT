@@ -103,8 +103,9 @@ self.addEventListener('fetch', (event) => {
         console.log('[Service Worker] Fetching from network:', event.request.url);
         return fetch(event.request)
           .then((networkResponse) => {
-            // Cache the response for future use (only for external resources)
-            if (event.request.url.startsWith('http') && 
+            // Cache the response for future use (only for external resources AND successful responses)
+            if (networkResponse && networkResponse.ok &&
+                event.request.url.startsWith('http') && 
                 (event.request.url.includes('cdn.') || 
                  event.request.url.includes('jsdelivr') || 
                  event.request.url.includes('googleapis'))) {
