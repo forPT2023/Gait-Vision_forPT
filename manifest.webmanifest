@@ -1,0 +1,11 @@
+{
+  "name": "Gait VISION forPT",
+  "short_name": "GaitVISION",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "theme_color": "#2d44b8",
+  "background_color": "#0a0e1a",
+  "icons": []
+}

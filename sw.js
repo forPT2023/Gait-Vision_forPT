@@ -5,10 +5,14 @@
 const CACHE_VERSION = 'gait-vision-v3.10.3';
 const CACHE_NAME = `gait-vision-cache-${CACHE_VERSION}`;
 
+const LOCAL_RESOURCES = [
+  './',
+  './index.html',
+  './manifest.webmanifest'
+];
+
 // All external resources to cache
-const RESOURCES_TO_CACHE = [
-  '/',
-  '/index.html',
+const EXTERNAL_RESOURCES_TO_CACHE = [
   // CDN Resources (excluding Tailwind CDN - it's dynamic and will be cached on first fetch)
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs',
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm/vision_wasm_internal.js',
@@ -31,15 +35,19 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('[Service Worker] Caching resources...');
-        // Cache resources one by one to handle failures gracefully
-        return Promise.allSettled(
-          RESOURCES_TO_CACHE.map((url) => {
-            return cache.add(url).catch((error) => {
-              console.warn(`[Service Worker] Failed to cache: ${url}`, error);
-              return null;
-            });
-          })
-        );
+        const scopedLocalResources = LOCAL_RESOURCES.map((path) => new URL(path, self.registration.scope).href);
+        return Promise.all(scopedLocalResources.map((url) => cache.add(url)))
+          .then(() => {
+            // External resources are best-effort and logged individually
+            return Promise.allSettled(
+              EXTERNAL_RESOURCES_TO_CACHE.map((url) => {
+                return cache.add(url).catch((error) => {
+                  console.warn(`[Service Worker] Failed to cache external resource: ${url}`, error);
+                  return null;
+                });
+              })
+            );
+          });
       })
       .then(() => {
         console.log('[Service Worker] Installation complete');
