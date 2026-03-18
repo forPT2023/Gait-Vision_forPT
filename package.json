@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "python3 -m http.server 3000",
     "start": "python3 -m http.server 3000",
-    "clean-port": "fuser -k 3000/tcp 2>/dev/null || true"
+    "clean-port": "fuser -k 3000/tcp 2>/dev/null || true",
+    "check": "node scripts/check-inline-module.mjs",
+    "test": "npm run check"
   },
   "keywords": ["gait", "analysis", "mediapipe", "pwa", "physical-therapy"],
   "author": "",
