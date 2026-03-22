@@ -37,6 +37,8 @@
     .btn-danger:hover:not(:disabled) { background: #dc2626; }
     .btn-secondary { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
     .btn-secondary:hover:not(:disabled) { background: #475569; border-color: #64748b; color: white; }
+    .btn-success { background: #10b981; color: white; border: 1px solid #34d399; }
+    .btn-success:hover:not(:disabled) { background: #059669; border-color: #10b981; }
     #canvas-container { position: relative; background: #000; display: flex; align-items: center; justify-content: center; }
     #video-element { display: none; }
     #canvas-element { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 100%; max-height: 100%; }
@@ -278,9 +280,9 @@
       <h1>Gait VISION forPT - 分析レポート</h1>
       <div id="report-preview"></div>
       <div class="button-group">
-        <button class="btn-print" onclick="window.print()">🖨️ 印刷</button>
-        <button class="btn-print" onclick="exportReportToPDF()">💾 PDF保存</button>
-        <button class="btn-close" onclick="document.getElementById('report-modal').classList.remove('show')">✕ 閉じる</button>
+        <button class="btn-print" id="btn-report-print">🖨️ 印刷</button>
+        <button class="btn-print" id="btn-report-pdf">💾 PDF保存</button>
+        <button class="btn-close" id="btn-report-close">✕ 閉じる</button>
       </div>
     </div>
   </div>
@@ -381,6 +383,13 @@
     const canvasCtx = canvasElement.getContext('2d');
     const fpsDisplay = document.getElementById('fps-display');
 
+    function createAppError(code, message, cause = null) {
+      const error = new Error(message);
+      error.code = code;
+      if (cause) error.cause = cause;
+      return error;
+    }
+
     // ========== Helper Functions ==========
 
     // Get appropriate timestamp for MediaPipe based on video source
@@ -433,6 +442,70 @@
       } catch (error) {
         console.warn('[Video] Cleanup warning:', error);
       }
+    }
+
+    function findClosestAnalysisPoint(elapsedMs) {
+      if (!analysisData.length) return null;
+
+      let low = 0;
+      let high = analysisData.length - 1;
+
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        const midValue = analysisData[mid].elapsedMs ?? analysisData[mid].timestamp ?? 0;
+        if (midValue < elapsedMs) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+
+      const candidate = analysisData[low];
+      const previous = analysisData[Math.max(0, low - 1)];
+      const candidateTime = candidate?.elapsedMs ?? candidate?.timestamp ?? 0;
+      const previousTime = previous?.elapsedMs ?? previous?.timestamp ?? 0;
+
+      return Math.abs(candidateTime - elapsedMs) < Math.abs(previousTime - elapsedMs)
+        ? candidate
+        : previous;
+    }
+
+    function renderAnalysisFrameFromData(dataPoint) {
+      if (!videoElement.videoWidth || !videoElement.videoHeight || !canvasElement.width || !canvasElement.height) {
+        return;
+      }
+
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (dataPoint?.landmarks?.length) {
+        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false);
+      }
+    }
+
+    function updateOrientationWarning() {
+      const warningEl = document.getElementById('orientation-warning');
+      const messageEl = document.getElementById('orientation-message');
+      const isMainAppVisible = !document.getElementById('main-app').classList.contains('hidden');
+
+      if (!warningEl || !messageEl || !isMobile || !isMainAppVisible) {
+        if (warningEl) warningEl.classList.remove('show');
+        return;
+      }
+
+      const isPortrait = window.matchMedia('(orientation: portrait)').matches;
+      const shouldShow = (currentPlane === 'frontal' && !isPortrait) || (currentPlane === 'sagittal' && isPortrait);
+
+      if (!shouldShow) {
+        warningEl.classList.remove('show');
+        return;
+      }
+
+      messageEl.textContent = currentPlane === 'frontal'
+        ? '前額面分析には縦向き（ポートレート）が推奨されます'
+        : '矢状面分析には横向き（ランドスケープ）が推奨されます';
+
+      warningEl.classList.add('show');
     }
 
     // ========== IndexedDB & Encryption ==========
@@ -499,20 +572,15 @@
         return new Promise((resolve, reject) => {
           const tx = db.transaction(['sessions'], 'readwrite');
           const store = tx.objectStore('sessions');
-          tx.onerror = () => {
-            showNotification('保存エラー。CSVで手動保存してください', 'error');
-            reject(tx.error);
-          };
-          tx.onabort = () => {
-            showNotification('保存エラー。CSVで手動保存してください', 'error');
-            reject(new Error('Transaction aborted'));
-          };
+          tx.onerror = () => reject(tx.error || createAppError('SESSION_SAVE_FAILED', 'IndexedDB transaction failed'));
+          tx.onabort = () => reject(createAppError('SESSION_SAVE_ABORTED', 'IndexedDB transaction aborted'));
           const request = store.add({ patientId: sessionData.patientId, timestamp: Date.now(), encrypted: encryptedData });
           request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || createAppError('SESSION_SAVE_FAILED', 'Failed to store session'));
         });
       } catch (error) {
         console.error('Save session error:', error);
-        showNotification('保存エラー: ' + error.message, 'error');
+        throw error;
       }
     }
 
@@ -958,9 +1026,11 @@
 
         console.log('[MediaPipe] ✅ Initialization complete');
         showNotification('MediaPipe初期化完了', 'success');
+        return true;
       } catch (error) {
         console.error('[MediaPipe] ❌ Initialization error:', error);
         showNotification('MediaPipeの初期化に失敗しました。ページを再読み込みしてください。', 'error');
+        throw createAppError('POSE_INIT_FAILED', 'MediaPipeの初期化に失敗しました。', error);
       }
     }
 
@@ -1317,7 +1387,11 @@
         throw new Error('Camera failed');
       } catch (error) {
         console.error('Camera error:', error);
-        showNotification('カメラの使用が許可されていません。ブラウザ設定を確認してください。', 'error');
+        if (error?.code === 'POSE_INIT_FAILED') {
+          showNotification(error.message, 'error');
+        } else {
+          showNotification('カメラの使用が許可されていません。ブラウザ設定を確認してください。', 'error');
+        }
       }
     }
 
@@ -1537,7 +1611,9 @@
 
         } catch (error) {
           console.error('[Video] Error:', error);
-          showNotification('動画読み込みエラー: ' + error.message, 'error');
+          if (error?.code !== 'POSE_INIT_FAILED') {
+            showNotification('動画読み込みエラー: ' + error.message, 'error');
+          }
 
           clearLoadedVideoState();
 
@@ -1574,7 +1650,10 @@
           gaitEvents: gaitEvents,
           stepCount: stepCount
         };
-        await saveSession(sessionData);
+        const sessionId = await saveSession(sessionData);
+        if (!sessionId) {
+          throw createAppError('SESSION_SAVE_FAILED', 'セッション保存に失敗しました。');
+        }
         showNotification('セッションデータを保存しました', 'success');
       } catch (error) {
         console.error('Finalize session error:', error);
@@ -2079,10 +2158,17 @@
 
       try {
         showNotification('解析動画を生成中...', 'info');
-        
-        // Get canvas stream for 1 second to capture frames
+
+        if (isAnalyzing) {
+          stopAllProcessing();
+        }
+
+        const previousTime = videoElement.currentTime || 0;
+        const previousPaused = videoElement.paused;
+
+        // Get canvas stream for analyzed playback capture
         const stream = canvasElement.captureStream(30);
-        
+
         // Select MIME type (MP4 preferred)
         const mp4Types = ['video/mp4', 'video/mp4;codecs=h264', 'video/mp4;codecs=avc1'];
         let mimeType = mp4Types.find(type => MediaRecorder.isTypeSupported(type));
@@ -2099,6 +2185,55 @@
           mimeType: mimeType,
           videoBitsPerSecond: 2500000
         });
+
+        let exportActive = false;
+        let exportFrameHandle = null;
+        let exportFinished = false;
+
+        const cancelExportLoop = () => {
+          if (exportFrameHandle && videoElement.cancelVideoFrameCallback) {
+            try {
+              videoElement.cancelVideoFrameCallback(exportFrameHandle);
+            } catch (_) {}
+          } else if (exportFrameHandle) {
+            cancelAnimationFrame(exportFrameHandle);
+          }
+          exportFrameHandle = null;
+        };
+
+        const renderExportFrame = () => {
+          if (!exportActive) return;
+
+          const elapsedMs = Math.max(0, videoElement.currentTime * 1000);
+          const dataPoint = findClosestAnalysisPoint(elapsedMs);
+          renderAnalysisFrameFromData(dataPoint);
+
+          if (!videoElement.ended && !videoElement.paused) {
+            if (videoElement.requestVideoFrameCallback) {
+              exportFrameHandle = videoElement.requestVideoFrameCallback(() => renderExportFrame());
+            } else {
+              exportFrameHandle = requestAnimationFrame(renderExportFrame);
+            }
+          }
+        };
+
+        const finishExport = async () => {
+          if (exportFinished) return;
+          exportFinished = true;
+          exportActive = false;
+          cancelExportLoop();
+          if (recorder.state !== 'inactive') {
+            recorder.stop();
+          }
+          videoElement.pause();
+          videoElement.currentTime = Math.min(previousTime, videoElement.duration || previousTime || 0);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const restorePoint = findClosestAnalysisPoint(videoElement.currentTime * 1000);
+          renderAnalysisFrameFromData(restorePoint);
+          if (!previousPaused) {
+            videoElement.pause();
+          }
+        };
 
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) {
@@ -2123,17 +2258,25 @@
           showNotification('解析動画を保存しました', 'success');
         };
 
-        // Reset video to beginning and replay with analysis
-        videoElement.currentTime = 0;
-        recorder.start();
+        const endedHandler = async () => {
+          await finishExport();
+          videoElement.removeEventListener('ended', endedHandler);
+        };
 
-        // Wait for video to finish playing
-        await new Promise((resolve) => {
-          videoElement.onended = () => {
-            recorder.stop();
-            resolve();
-          };
-          videoElement.play();
+        videoElement.addEventListener('ended', endedHandler);
+
+        // Reset video to beginning and replay with stored analysis overlay
+        videoElement.currentTime = 0;
+        videoElement.muted = true;
+        renderAnalysisFrameFromData(findClosestAnalysisPoint(0));
+        recorder.start();
+        exportActive = true;
+        renderExportFrame();
+
+        await videoElement.play();
+        await new Promise((resolve, reject) => {
+          recorder.addEventListener('stop', resolve, { once: true });
+          recorder.addEventListener('error', () => reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。')), { once: true });
         });
 
       } catch (error) {
@@ -2567,6 +2710,11 @@
             </div>
           </div>
 
+          <h2>📈 時系列推移</h2>
+          <div class="report-chart-box">
+            <canvas id="report-timeline-chart" class="report-chart-mini"></canvas>
+          </div>
+
           <h2>🦵 関節角度詳細</h2>
           <table class="report-table">
             <thead>
@@ -2731,10 +2879,13 @@
         await initPoseLandmarker();
         initCharts(); // Initialize charts immediately in static state
         resizeCanvas();
+        updateOrientationWarning();
         showNotification('初期化完了', 'success');
       } catch (error) {
         console.error('Init error:', error);
-        showNotification('初期化エラー', 'error');
+        if (error?.code !== 'POSE_INIT_FAILED') {
+          showNotification('初期化エラー', 'error');
+        }
       }
     });
 
@@ -2745,6 +2896,7 @@
       document.getElementById('btn-sagittal').classList.remove('btn-primary');
       document.getElementById('btn-sagittal').classList.add('btn-secondary');
       document.getElementById('charts-container').classList.remove('plane-sagittal');
+      updateOrientationWarning();
       showNotification('前額面モード', 'success');
     });
 
@@ -2755,6 +2907,7 @@
       document.getElementById('btn-frontal').classList.remove('btn-primary');
       document.getElementById('btn-frontal').classList.add('btn-secondary');
       document.getElementById('charts-container').classList.add('plane-sagittal');
+      updateOrientationWarning();
       showNotification('矢状面モード', 'success');
     });
 
@@ -2805,6 +2958,11 @@
     document.getElementById('btn-save-recording').addEventListener('click', saveRecordedVideo);
     document.getElementById('btn-discard-recording').addEventListener('click', discardRecordedVideo);
     document.getElementById('btn-save-analyzed-video').addEventListener('click', saveAnalyzedVideo);
+    document.getElementById('btn-report-print').addEventListener('click', () => window.print());
+    document.getElementById('btn-report-pdf').addEventListener('click', exportReportToPDF);
+    document.getElementById('btn-report-close').addEventListener('click', () => {
+      document.getElementById('report-modal').classList.remove('show');
+    });
 
     document.getElementById('btn-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-report').addEventListener('click', generateReport);
@@ -2856,7 +3014,11 @@
       }
     });
 
-    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('resize', () => {
+      resizeCanvas();
+      updateOrientationWarning();
+    });
+    window.addEventListener('orientationchange', updateOrientationWarning);
 
     // Memory cleanup every 5 minutes (idle only, never interrupt an active session)
     setInterval(async () => {
