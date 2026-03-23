@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildCameraConstraints, releaseCameraResources, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from '../src/video/camera.js';
+import { buildCameraConstraints, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from '../src/video/camera.js';
 
 test('buildCameraConstraints prefers portrait ratio on tall viewports', () => {
   const constraints = buildCameraConstraints({ windowWidth: 600, windowHeight: 900 });
   assert.equal(constraints[0].video.aspectRatio.ideal, 9 / 16);
+  assert.deepEqual(constraints[0].video.facingMode, { ideal: 'environment' });
+  assert.equal(constraints[0].video.height.ideal, 1920);
   assert.deepEqual(constraints[2], { video: true });
 });
 
@@ -20,6 +22,29 @@ test('stopMediaStream stops every track when a stream is present', () => {
     }
   });
   assert.deepEqual(stopped, ['a', 'b']);
+});
+
+test('shouldRestartCameraForOrientationChange only allows safe preview restarts', () => {
+  assert.equal(shouldRestartCameraForOrientationChange({
+    hasMediaStream: true,
+    isRecording: false,
+    isAnalyzing: false,
+    sourceMode: 'camera'
+  }), true);
+
+  assert.equal(shouldRestartCameraForOrientationChange({
+    hasMediaStream: true,
+    isRecording: true,
+    isAnalyzing: false,
+    sourceMode: 'camera'
+  }), false);
+
+  assert.equal(shouldRestartCameraForOrientationChange({
+    hasMediaStream: true,
+    isRecording: false,
+    isAnalyzing: false,
+    sourceMode: 'video'
+  }), false);
 });
 
 test('waitForVideoMetadataAndPlay resolves after play succeeds', async () => {
