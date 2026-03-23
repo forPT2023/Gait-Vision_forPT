@@ -1,14 +1,43 @@
 // Service Worker for Gait VISION forPT
-// Version: 3.10.3
+// Version: 3.10.3-pwa2
 // Purpose: Cache all external CDN resources for offline operation
 
-const CACHE_VERSION = 'gait-vision-v3.10.3';
+const CACHE_VERSION = 'gait-vision-v3.10.3-pwa2';
 const CACHE_NAME = `gait-vision-cache-${CACHE_VERSION}`;
 
 const LOCAL_RESOURCES = [
   './',
   './index.html',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './icons/icon.svg',
+  './src/app/bootstrap.js',
+  './src/app/session.js',
+  './src/app/state.js',
+  './src/analysis/constants.js',
+  './src/analysis/metrics.js',
+  './src/analysis/session.js',
+  './src/config/app.js',
+  './src/config/report.js',
+  './src/report/render.js',
+  './src/report/templates/frontal.js',
+  './src/report/templates/sagittal.js',
+  './src/report/summary.js',
+  './src/config/charts.js',
+  './src/ui/charts.js',
+  './src/ui/controls.js',
+  './src/ui/notifications.js',
+  './src/ui/orientation.js',
+  './src/ui/patient.js',
+  './src/ui/reportModal.js',
+  './src/ui/screens.js',
+  './src/storage/db.js',
+  './src/storage/export.js',
+  './src/video/camera.js',
+  './src/video/recording.js',
+  './src/video/runtime.js',
+  './src/video/videoFile.js',
+  './src/pwa/install.js',
+  './src/pwa/serviceWorker.js'
 ];
 
 // All external resources to cache
@@ -119,7 +148,9 @@ self.addEventListener('fetch', (event) => {
           })
           .catch((error) => {
             console.error('[Service Worker] Fetch failed:', event.request.url, error);
-            // Return a custom offline page or error response
+            if (event.request.mode === 'navigate') {
+              return caches.match(new URL('./index.html', self.registration.scope).href);
+            }
             return new Response('Offline - Resource not available', {
               status: 503,
               statusText: 'Service Unavailable',

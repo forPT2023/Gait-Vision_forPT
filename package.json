@@ -8,9 +8,16 @@
     "start": "python3 -m http.server 3000",
     "clean-port": "fuser -k 3000/tcp 2>/dev/null || true",
     "check": "node scripts/check-inline-module.mjs",
-    "test": "npm run check"
+    "test": "npm run check && npm run test:unit",
+    "test:unit": "node --test tests/*.test.mjs"
   },
-  "keywords": ["gait", "analysis", "mediapipe", "pwa", "physical-therapy"],
+  "keywords": [
+    "gait",
+    "analysis",
+    "mediapipe",
+    "pwa",
+    "physical-therapy"
+  ],
   "author": "",
   "license": "MIT"
 }

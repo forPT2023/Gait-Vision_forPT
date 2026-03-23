@@ -4,9 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GaitVISION">
   <title>Gait VISION forPT - 歩行分析システム</title>
 
   <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
 
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -20,12 +25,12 @@
 
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100dvh; overflow: hidden; background-color: #0a0e1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #e2e8f0; }
+    html, body { width: 100%; height: 100dvh; overflow: hidden; background-color: #0a0e1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #e2e8f0; overscroll-behavior: none; }
     #main-app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
     #main-app.hidden { display: none; }
-    header { flex-shrink: 0; background: linear-gradient(135deg, #1a1f2e 0%, #252d3d 100%); padding: 0.75rem 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.5); border-bottom: 1px solid #2d3748; }
+    header { flex-shrink: 0; background: linear-gradient(135deg, #1a1f2e 0%, #252d3d 100%); padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 1rem 0.75rem 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.5); border-bottom: 1px solid #2d3748; }
     #main-layout { flex: 1; overflow: hidden; display: flex; position: relative; }
-    #control-bar { flex-shrink: 0; background: #151923; padding: 0.75rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; border-top: 2px solid #2d3748; align-items: center; }
+    #control-bar { flex-shrink: 0; background: #151923; padding: 0.75rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px)) 0.75rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; border-top: 2px solid #2d3748; align-items: center; }
     #control-bar button { padding: 0.625rem 1rem; border-radius: 0.5rem; border: none; font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
     #control-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
     #control-bar select { padding: 0.625rem 1rem; border-radius: 0.5rem; border: 1px solid #2d3748; font-weight: 600; font-size: 0.875rem; cursor: pointer; background: #1a1f2e; color: #e2e8f0; }
@@ -264,6 +269,10 @@
         <button id="btn-settings" class="btn-secondary">🗑️ データ削除</button>
         <span class="tooltiptext">保存データを全削除</span>
       </div>
+      <div class="tooltip">
+        <button id="btn-install-app" class="btn-secondary" style="display:none;">📲 インストール</button>
+        <span class="tooltiptext">ホーム画面追加 / アプリとしてインストール</span>
+      </div>
     </div>
   </div>
 
@@ -325,18 +334,33 @@
 
   <script type="module">
     import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
+    import { LM, createInitialEmaValues } from './src/analysis/constants.js';
+    import { buildAnalysisDataPoint, calculateCadenceFromEvents } from './src/analysis/session.js';
+    import { calcJointAngles, calcPelvicTilt, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema } from './src/analysis/metrics.js';
+    import { buildStoredPatientIdState, hasStoredConsent, persistConsent, persistPatientId } from './src/app/bootstrap.js';
+    import { buildSessionRecord } from './src/app/session.js';
+    import { createInitialAnalysisState, createStartedAnalysisState } from './src/app/state.js';
+    import { applyPdfImageLayout, buildPdfImageLayout, buildReportHtml } from './src/report/render.js';
+    import { createReportSummary } from './src/report/summary.js';
+    import { APP_VERSION_LABEL } from './src/config/app.js';
+    import { createChartController } from './src/ui/charts.js';
+    import { applyPatientValidationUI, applyPlaneModeUI, disableRecordButton, enableAnalysisExportButtons, formatPatientDisplay, setRecordButtonForActiveAnalysis, setRecordButtonForActiveRecording, setRecordButtonForCameraMode, setRecordButtonForVideoMode } from './src/ui/controls.js';
+    import { showNotification as renderNotification } from './src/ui/notifications.js';
+    import { updateOrientationWarning } from './src/ui/orientation.js';
+    import { validatePatientId } from './src/ui/patient.js';
+    import { closeReportModal, openReportModal, setReportHtml } from './src/ui/reportModal.js';
+    import { restoreScreenState, showMainApp, showPatientScreen } from './src/ui/screens.js';
+    import { setupInstallPrompt } from './src/pwa/install.js';
+    import { registerAppServiceWorker } from './src/pwa/serviceWorker.js';
+    import { createSessionStorage } from './src/storage/db.js';
+    import { buildAnalysisCsv, buildCsvExportFilename, buildPdfReportFilename, buildSessionExport, createBackupFilename, downloadBlobFile, downloadJson } from './src/storage/export.js';
+    import { buildCameraConstraints, releaseCameraResources, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from './src/video/camera.js';
+    import { buildAnalyzedVideoFilename, buildRecordingFilename, buildRecordingMetadata, closeSaveRecordingDialog, createCanvasRecordingSession, downloadBlob, formatRecordingInfoText, resetRecordedVideoState, showSaveRecordingDialog as showRecordingSaveDialog } from './src/video/recording.js';
+    import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findClosestAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
+    import { configureVideoElementForFile, createVideoFileInput, startVideoPlaybackForAnalysis, waitForVideoLoad } from './src/video/videoFile.js';
 
-    console.log('Gait VISION forPT v3.10.3 (Fixed: Canvas Size & Graph Accuracy) - Initializing...');
+    console.log(`${APP_VERSION_LABEL} (Fixed: Canvas Size & Graph Accuracy) - Initializing...`);
 
-    // Landmark constants (33 points)
-    const LM = {
-      NOSE: 0, LEFT_EYE_INNER: 1, LEFT_EYE: 2, LEFT_EYE_OUTER: 3, RIGHT_EYE_INNER: 4, RIGHT_EYE: 5, RIGHT_EYE_OUTER: 6,
-      LEFT_EAR: 7, RIGHT_EAR: 8, MOUTH_LEFT: 9, MOUTH_RIGHT: 10, LEFT_SHOULDER: 11, RIGHT_SHOULDER: 12,
-      LEFT_ELBOW: 13, RIGHT_ELBOW: 14, LEFT_WRIST: 15, RIGHT_WRIST: 16, LEFT_PINKY: 17, RIGHT_PINKY: 18,
-      LEFT_INDEX: 19, RIGHT_INDEX: 20, LEFT_THUMB: 21, RIGHT_THUMB: 22, LEFT_HIP: 23, RIGHT_HIP: 24,
-      LEFT_KNEE: 25, RIGHT_KNEE: 26, LEFT_ANKLE: 27, RIGHT_ANKLE: 28, LEFT_HEEL: 29, RIGHT_HEEL: 30,
-      LEFT_FOOT_INDEX: 31, RIGHT_FOOT_INDEX: 32
-    };
 
     // Global state
     let poseLandmarker = null;
@@ -362,19 +386,15 @@
     let prevTimestamp = null;
     let gaitEvents = [];
     let stepCount = 0;
+    let analysisFrameCount = 0;
     let lastHeelStrikeTime = 0;
-    let emaValues = { speed: 0, cadence: 0, leftKnee: 0, rightKnee: 0, leftHip: 0, rightHip: 0, leftAnkle: 0, rightAnkle: 0, trunk: 0, pelvis: 0 };
-    let charts = {};
-    let lastChartUpdateTime = 0;
-    let chartUpdateInterval = 200; // Update charts every 200ms
+    let emaValues = createInitialEmaValues();
 
     // Phase 3: Video file and recording
     let videoFileUrl = null;
     let videoEpochBaseMs = null; // For Chart.js realtime x-axis in video mode
     let videoFrameCallbackHandle = null; // requestVideoFrameCallback handle (video mode)
     let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    let db = null;
-    let encryptionKey = null;
     let recordingInterval = null; // Timer for recording info display
 
     // DOM Elements
@@ -382,6 +402,32 @@
     const canvasElement = document.getElementById('canvas-element');
     const canvasCtx = canvasElement.getContext('2d');
     const fpsDisplay = document.getElementById('fps-display');
+    const installButton = document.getElementById('btn-install-app');
+    const chartController = createChartController({
+      ChartCtor: window.Chart,
+      document,
+      getVideoContext: () => ({
+        videoFileUrl,
+        videoEpochBaseMs,
+        currentTime: videoElement && !Number.isNaN(videoElement.currentTime) ? videoElement.currentTime : 0
+      }),
+      notifyReset: () => showNotification('波形をリセットしました', 'info'),
+      logger: console
+    });
+
+    ({
+      analysisStartEpochMs,
+      analysisStartMpTimestamp,
+      analysisData,
+      prevLandmarks,
+      prevWorldLandmarks,
+      prevTimestamp,
+      gaitEvents,
+      stepCount,
+      analysisFrameCount,
+      lastHeelStrikeTime,
+      emaValues
+    } = createInitialAnalysisState({ createInitialEmaValues }));
 
     function createAppError(code, message, cause = null) {
       const error = new Error(message);
@@ -390,84 +436,42 @@
       return error;
     }
 
+    const sessionStorage = createSessionStorage({
+      indexedDBRef: indexedDB,
+      cryptoRef: crypto,
+      navigatorRef: navigator,
+      createError: createAppError,
+      logger: console
+    });
+
     // ========== Helper Functions ==========
 
-    // Get appropriate timestamp for MediaPipe based on video source
-    function getMediaPipeTimestamp() {
-      return videoElement.srcObject
-        ? performance.now()  // Camera mode: use performance.now()
-        : videoElement.currentTime * 1000;  // Video mode: use video time in ms
-    }
-
-    function getSourceMode() {
-      if (videoElement.srcObject) return 'camera';
-      if (videoFileUrl) return 'video';
-      return 'idle';
-    }
-
-    function resetVideoElementEvents() {
-      videoElement.onloadedmetadata = null;
-      videoElement.onloadeddata = null;
-      videoElement.oncanplay = null;
-      videoElement.oncanplaythrough = null;
-      videoElement.onerror = null;
-      videoElement.onended = null;
-    }
-
     function clearLoadedVideoState() {
-      if (videoFrameCallbackHandle && videoElement.cancelVideoFrameCallback) {
-        try {
-          videoElement.cancelVideoFrameCallback(videoFrameCallbackHandle);
-        } catch (_) {}
-        videoFrameCallbackHandle = null;
-      }
-
-      resetVideoElementEvents();
-
-      if (videoFileUrl) {
-        try {
-          URL.revokeObjectURL(videoFileUrl);
-        } catch (_) {}
-        videoFileUrl = null;
-      }
-      videoEpochBaseMs = null;
-
-      try {
-        if (!videoElement.paused) videoElement.pause();
-        videoElement.currentTime = 0;
-        videoElement.removeAttribute('src');
-        if (!videoElement.srcObject) {
-          videoElement.load();
-        }
-      } catch (error) {
-        console.warn('[Video] Cleanup warning:', error);
-      }
+      const nextState = clearVideoRuntimeState({
+        videoElement,
+        videoFrameCallbackHandle,
+        videoFileUrl,
+        URLRef: URL,
+        logger: console
+      });
+      videoFrameCallbackHandle = nextState.videoFrameCallbackHandle;
+      videoFileUrl = nextState.videoFileUrl;
+      videoEpochBaseMs = nextState.videoEpochBaseMs;
     }
 
-    function findClosestAnalysisPoint(elapsedMs) {
-      if (!analysisData.length) return null;
+    function getAnalysisSourceMode() {
+      return getSourceMode({
+        hasStream: !!videoElement.srcObject,
+        videoFileUrl
+      });
+    }
 
-      let low = 0;
-      let high = analysisData.length - 1;
-
-      while (low < high) {
-        const mid = Math.floor((low + high) / 2);
-        const midValue = analysisData[mid].elapsedMs ?? analysisData[mid].timestamp ?? 0;
-        if (midValue < elapsedMs) {
-          low = mid + 1;
-        } else {
-          high = mid;
-        }
-      }
-
-      const candidate = analysisData[low];
-      const previous = analysisData[Math.max(0, low - 1)];
-      const candidateTime = candidate?.elapsedMs ?? candidate?.timestamp ?? 0;
-      const previousTime = previous?.elapsedMs ?? previous?.timestamp ?? 0;
-
-      return Math.abs(candidateTime - elapsedMs) < Math.abs(previousTime - elapsedMs)
-        ? candidate
-        : previous;
+    function getCurrentMediaPipeTimestamp() {
+      return getMediaPipeTimestamp({
+        hasStream: !!videoElement.srcObject,
+        currentTime: videoElement.currentTime,
+        now: () => performance.now()
+      });
     }
 
     function renderAnalysisFrameFromData(dataPoint) {
@@ -483,100 +487,21 @@
       }
     }
 
-    function updateOrientationWarning() {
-      const warningEl = document.getElementById('orientation-warning');
-      const messageEl = document.getElementById('orientation-message');
-      const isMainAppVisible = !document.getElementById('main-app').classList.contains('hidden');
-
-      if (!warningEl || !messageEl || !isMobile || !isMainAppVisible) {
-        if (warningEl) warningEl.classList.remove('show');
-        return;
-      }
-
-      const isPortrait = window.matchMedia('(orientation: portrait)').matches;
-      const shouldShow = (currentPlane === 'frontal' && !isPortrait) || (currentPlane === 'sagittal' && isPortrait);
-
-      if (!shouldShow) {
-        warningEl.classList.remove('show');
-        return;
-      }
-
-      messageEl.textContent = currentPlane === 'frontal'
-        ? '前額面分析には縦向き（ポートレート）が推奨されます'
-        : '矢状面分析には横向き（ランドスケープ）が推奨されます';
-
-      warningEl.classList.add('show');
-    }
-
-    // ========== IndexedDB & Encryption ==========
-
-    async function initDatabase() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open('GaitAnalyzerDB', 1);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          db = request.result;
-          resolve(db);
-        };
-        request.onupgradeneeded = (event) => {
-          const database = event.target.result;
-          if (!database.objectStoreNames.contains('sessions')) {
-            database.createObjectStore('sessions', { keyPath: 'id', autoIncrement: true });
-          }
-          if (!database.objectStoreNames.contains('meta')) {
-            database.createObjectStore('meta', { keyPath: 'key' });
-          }
-        };
-      });
-    }
-
-    async function getOrCreateEncryptionKey() {
-      if (!db) await initDatabase();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(['meta'], 'readwrite');
-        const store = tx.objectStore('meta');
-        const request = store.get('encryptionKey');
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(new Error('Transaction aborted'));
-        request.onsuccess = async () => {
-          if (request.result && request.result.value) {
-            encryptionKey = await crypto.subtle.importKey('raw', request.result.value, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
-            resolve(encryptionKey);
-          } else {
-            const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-            const exported = await crypto.subtle.exportKey('raw', key);
-            store.put({ key: 'encryptionKey', value: exported });
-            encryptionKey = key;
-            resolve(key);
-          }
-        };
+    function syncOrientationWarning() {
+      updateOrientationWarning({
+        documentRef: document,
+        windowRef: window,
+        currentPlane,
+        isMobile
       });
     }
 
     async function saveSession(sessionData) {
       try {
-        if (!db) await initDatabase();
-        if (navigator.storage && navigator.storage.estimate) {
-          const estimate = await navigator.storage.estimate();
-          const percentUsed = (estimate.usage / estimate.quota) * 100;
-          if (percentUsed > 80) {
+        return await sessionStorage.saveSession(sessionData, {
+          onStorageWarning: () => {
             showNotification('ストレージ容量が80%を超えています', 'error');
           }
-        }
-        if (!encryptionKey) await getOrCreateEncryptionKey();
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const encoded = new TextEncoder().encode(JSON.stringify(sessionData));
-        const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, encryptionKey, encoded);
-        const encryptedData = { iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) };
-
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction(['sessions'], 'readwrite');
-          const store = tx.objectStore('sessions');
-          tx.onerror = () => reject(tx.error || createAppError('SESSION_SAVE_FAILED', 'IndexedDB transaction failed'));
-          tx.onabort = () => reject(createAppError('SESSION_SAVE_ABORTED', 'IndexedDB transaction aborted'));
-          const request = store.add({ patientId: sessionData.patientId, timestamp: Date.now(), encrypted: encryptedData });
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error || createAppError('SESSION_SAVE_FAILED', 'Failed to store session'));
         });
       } catch (error) {
         console.error('Save session error:', error);
@@ -587,14 +512,7 @@
     async function clearAllData() {
       if (!confirm('すべてのデータを削除しますか？この操作は取り消せません。')) return;
       try {
-        if (!db) await initDatabase();
-        const tx = db.transaction(['sessions'], 'readwrite');
-        const store = tx.objectStore('sessions');
-        await new Promise((resolve, reject) => {
-          const req = store.clear();
-          req.onsuccess = () => resolve();
-          req.onerror = () => reject(req.error);
-        });
+        await sessionStorage.clearAllData();
         showNotification('すべてのデータを削除しました', 'success');
       } catch (error) {
         console.error('Clear data error:', error);
@@ -604,72 +522,25 @@
 
     async function exportAllData() {
       try {
-        if (!db) await initDatabase();
-        const tx = db.transaction(['sessions'], 'readonly');
-        const store = tx.objectStore('sessions');
-        const request = store.getAll();
+        const { storedCount, decryptedSessions } = await sessionStorage.exportSessions();
 
-        const allSessions = await new Promise((resolve, reject) => {
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        });
-
-        if (allSessions.length === 0) {
+        if (storedCount === 0) {
           showNotification('エクスポートするデータがありません', 'error');
           return;
         }
 
-        // Decrypt all sessions
-        const key = await getOrCreateEncryptionKey();
-        const decryptedSessions = [];
-
-        for (const session of allSessions) {
-          try {
-            const iv = new Uint8Array(session.encrypted.iv);
-            const cipherArray = session.encrypted.data || session.encrypted.ciphertext;
-            if (!cipherArray) throw new Error('Encrypted payload missing');
-            const ciphertext = new Uint8Array(cipherArray);
-            const decrypted = await crypto.subtle.decrypt(
-              { name: 'AES-GCM', iv },
-              key,
-              ciphertext
-            );
-            const sessionData = JSON.parse(new TextDecoder().decode(decrypted));
-            decryptedSessions.push({
-              id: session.id,
-              patientId: session.patientId,
-              timestamp: session.timestamp,
-              savedDate: new Date(session.timestamp).toISOString(),
-              ...sessionData
-            });
-          } catch (error) {
-            console.error('Decrypt error for session:', session.id, error);
-            // Continue to next session even if one fails
-          }
-        }
-
-        // Check if any sessions were successfully decrypted
         if (decryptedSessions.length === 0) {
           showNotification('データの復号化に失敗しました', 'error');
           return;
         }
 
-        // Export as JSON
-        const exportData = {
-          exportDate: new Date().toISOString(),
-          version: 'Gait VISION forPT v3.10.3',
-          totalSessions: decryptedSessions.length,
-          sessions: decryptedSessions
-        };
-
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
-        a.download = `gait_backup_${dateStr}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
+        const exportData = buildSessionExport({ sessions: decryptedSessions });
+        downloadJson({
+          documentRef: document,
+          URLRef: URL,
+          payload: exportData,
+          filename: createBackupFilename()
+        });
 
         showNotification(`${decryptedSessions.length}件のセッションをエクスポートしました`, 'success');
       } catch (error) {
@@ -680,11 +551,11 @@
 
     // Utility functions
     function showNotification(message, type) {
-      const n = document.createElement('div');
-      n.className = 'notification ' + (type || 'info');
-      n.textContent = message;
-      document.body.appendChild(n);
-      setTimeout(() => n.remove(), 3000);
+      return renderNotification({
+        documentRef: document,
+        message,
+        type: type || 'info'
+      });
     }
 
     function updateFPS() {
@@ -728,214 +599,7 @@
       }
     }
 
-    // Gait analysis functions
-    function calcAngle3D(a, b, c) {
-      // Validate input points
-      if (!a || !b || !c ||
-          typeof a.x !== 'number' || typeof a.y !== 'number' || typeof a.z !== 'number' ||
-          typeof b.x !== 'number' || typeof b.y !== 'number' || typeof b.z !== 'number' ||
-          typeof c.x !== 'number' || typeof c.y !== 'number' || typeof c.z !== 'number') {
-        return 0;
-      }
-
-      const ba = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-      const bc = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
-      const dot = ba.x * bc.x + ba.y * bc.y + ba.z * bc.z;
-      const magBA = Math.sqrt(ba.x * ba.x + ba.y * ba.y + ba.z * ba.z);
-      const magBC = Math.sqrt(bc.x * bc.x + bc.y * bc.y + bc.z * bc.z);
-
-      if (magBA === 0 || magBC === 0 || isNaN(magBA) || isNaN(magBC)) return 0;
-
-      const cosAngle = dot / (magBA * magBC);
-      const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle))) * (180 / Math.PI);
-
-      return isNaN(angle) || !isFinite(angle) ? 0 : angle;
-    }
-
-    function calcJointAngles(wl) {
-      if (!wl || wl.length < 33) return null;
-      return {
-        leftHip: calcAngle3D(wl[LM.LEFT_SHOULDER], wl[LM.LEFT_HIP], wl[LM.LEFT_KNEE]),
-        rightHip: calcAngle3D(wl[LM.RIGHT_SHOULDER], wl[LM.RIGHT_HIP], wl[LM.RIGHT_KNEE]),
-        leftKnee: calcAngle3D(wl[LM.LEFT_HIP], wl[LM.LEFT_KNEE], wl[LM.LEFT_ANKLE]),
-        rightKnee: calcAngle3D(wl[LM.RIGHT_HIP], wl[LM.RIGHT_KNEE], wl[LM.RIGHT_ANKLE]),
-        leftAnkle: calcAngle3D(wl[LM.LEFT_KNEE], wl[LM.LEFT_ANKLE], wl[LM.LEFT_FOOT_INDEX]),
-        rightAnkle: calcAngle3D(wl[LM.RIGHT_KNEE], wl[LM.RIGHT_ANKLE], wl[LM.RIGHT_FOOT_INDEX])
-      };
-    }
-
-    function calcTrunkAngle(wl) {
-      if (!wl || wl.length < 33) {
-        console.warn('[Trunk] Invalid world landmarks (length:', wl ? wl.length : 'null', ')');
-        return 0;
-      }
-
-      // Calculate trunk inclination in sagittal plane (forward/backward lean)
-      const shoulderMid = {
-        x: (wl[LM.LEFT_SHOULDER].x + wl[LM.RIGHT_SHOULDER].x) / 2,
-        y: (wl[LM.LEFT_SHOULDER].y + wl[LM.RIGHT_SHOULDER].y) / 2,
-        z: (wl[LM.LEFT_SHOULDER].z + wl[LM.RIGHT_SHOULDER].z) / 2
-      };
-      const hipMid = {
-        x: (wl[LM.LEFT_HIP].x + wl[LM.RIGHT_HIP].x) / 2,
-        y: (wl[LM.LEFT_HIP].y + wl[LM.RIGHT_HIP].y) / 2,
-        z: (wl[LM.LEFT_HIP].z + wl[LM.RIGHT_HIP].z) / 2
-      };
-
-      // Calculate angle from vertical (Y-axis)
-      // In MediaPipe world coordinates: Y is vertical (up is negative), Z is depth (camera direction)
-      // For sagittal plane (side view): we need the angle between trunk vector and vertical
-      const dy = hipMid.y - shoulderMid.y; // Vertical component (should be positive: hip below shoulder)
-      const dz = shoulderMid.z - hipMid.z; // Forward/backward lean (positive = leaning forward)
-
-      // Trunk angle from vertical in sagittal plane
-      // If perfectly upright: dz ≈ 0, angle ≈ 0
-      // If leaning forward: dz > 0, angle > 0
-      const angle = Math.abs(Math.atan2(dz, dy) * (180 / Math.PI));
-
-      // Debug log (1% sampling)
-      if (Math.random() < 0.01) {
-        console.log('[Trunk] dy:', dy.toFixed(4), '| dz:', dz.toFixed(4), '| angle:', angle.toFixed(2), '°');
-      }
-
-      return isFinite(angle) ? angle : 0;
-    }
-
-    function calcPelvicTilt(wl) {
-      if (!wl || wl.length < 33) return 0;
-      const dy = wl[LM.RIGHT_HIP].y - wl[LM.LEFT_HIP].y;
-      const dx = wl[LM.RIGHT_HIP].x - wl[LM.LEFT_HIP].x;
-      return Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
-    }
-
-    function calcWalkingSpeed(wl, prevWl, deltaT) {
-      if (!wl || !prevWl || !deltaT || deltaT <= 0 || wl.length < 33 || prevWl.length < 33) return 0;
-
-      // Use 3D world landmarks for accurate speed calculation
-      const hipMid = {
-        x: (wl[LM.LEFT_HIP].x + wl[LM.RIGHT_HIP].x) / 2,
-        y: (wl[LM.LEFT_HIP].y + wl[LM.RIGHT_HIP].y) / 2,
-        z: (wl[LM.LEFT_HIP].z + wl[LM.RIGHT_HIP].z) / 2
-      };
-      const prevHipMid = {
-        x: (prevWl[LM.LEFT_HIP].x + prevWl[LM.RIGHT_HIP].x) / 2,
-        y: (prevWl[LM.LEFT_HIP].y + prevWl[LM.RIGHT_HIP].y) / 2,
-        z: (prevWl[LM.LEFT_HIP].z + prevWl[LM.RIGHT_HIP].z) / 2
-      };
-
-      // Calculate 3D displacement (in meters - MediaPipe world coordinates)
-      const displacement = Math.sqrt(
-        Math.pow(hipMid.x - prevHipMid.x, 2) +
-        Math.pow(hipMid.y - prevHipMid.y, 2) +
-        Math.pow(hipMid.z - prevHipMid.z, 2)
-      );
-
-      // Calculate shoulder width for scaling (3D distance in meters)
-      const shoulderWidth = Math.sqrt(
-        Math.pow(wl[LM.LEFT_SHOULDER].x - wl[LM.RIGHT_SHOULDER].x, 2) +
-        Math.pow(wl[LM.LEFT_SHOULDER].y - wl[LM.RIGHT_SHOULDER].y, 2) +
-        Math.pow(wl[LM.LEFT_SHOULDER].z - wl[LM.RIGHT_SHOULDER].z, 2)
-      );
-
-      // Prevent division by zero
-      if (shoulderWidth < 0.05 || isNaN(shoulderWidth)) {
-        // Shoulder width too small or invalid
-        return 0;
-      }
-
-      // Speed calculation:
-      // MediaPipe world coordinates are in normalized units relative to the hip
-      // We need to scale to real-world units using shoulder width as reference
-      // Average human shoulder width is ~0.4m (40cm)
-      // Speed = (displacement / shoulderWidth) * 0.4m / time
-      const scaledDisplacement = (displacement / shoulderWidth) * 0.4; // Convert to meters
-      const speedMps = scaledDisplacement / (deltaT / 1000);
-
-      // Debug log (1% sampling)
-      if (Math.random() < 0.01) {
-        console.log('[Speed] displacement:', displacement.toFixed(5), '| shoulderWidth:', shoulderWidth.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
-      }
-
-      // Sanity check: walking speed should be 0-3 m/s
-      // Normal walking: 0.8-1.5 m/s, Fast walking: 1.5-2.5 m/s
-      if (isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
-        console.warn('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), '| shoulderWidth:', shoulderWidth.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
-        return Math.max(0, Math.min(3, speedMps)); // Clamp instead of returning 0
-      }
-
-      return speedMps;
-    }
-
-    function calcSymmetryIndex(left, right) {
-      // Validate inputs
-      if (typeof left !== 'number' || typeof right !== 'number' ||
-          isNaN(left) || isNaN(right) || !isFinite(left) || !isFinite(right)) {
-        return 100;
-      }
-
-      if (left === 0 && right === 0) return 100;
-
-      const mean = (left + right) / 2;
-      if (mean === 0) return 100;
-
-      const symmetry = 100 - (Math.abs(left - right) / mean * 100);
-
-      // Clamp to 0-100 range
-      return Math.max(0, Math.min(100, symmetry));
-    }
-
-    function detectGaitEvents(lm, timestamp) {
-      if (!lm || lm.length < 33) return null;
-
-      // MediaPipe Y coordinate: 0 = top, 1 = bottom
-      // Heel strike = heel moves DOWN (Y increases)
-      const leftHeelY = lm[LM.LEFT_HEEL].y;
-      const rightHeelY = lm[LM.RIGHT_HEEL].y;
-      const leftFootY = lm[LM.LEFT_FOOT_INDEX].y;
-      const rightFootY = lm[LM.RIGHT_FOOT_INDEX].y;
-
-      // Get knee Y positions for reference (heel should be below knee)
-      const leftKneeY = lm[LM.LEFT_KNEE].y;
-      const rightKneeY = lm[LM.RIGHT_KNEE].y;
-
-      if (prevLandmarks) {
-        const prevLeftHeelY = prevLandmarks[LM.LEFT_HEEL].y;
-        const prevRightHeelY = prevLandmarks[LM.RIGHT_HEEL].y;
-
-        // Heel strike detection (improved sensitivity):
-        // 1. Heel moving down (Y increasing) OR velocity change
-        // 2. Heel below knee level (more lenient threshold)
-        // 3. Minimum time between heel strikes (250ms for faster detection)
-        const leftHeelDown = leftHeelY > prevLeftHeelY;
-        const rightHeelDown = rightHeelY > prevRightHeelY;
-
-        // More lenient threshold: heel just needs to be below knee
-        const leftHeelLow = leftHeelY > leftKneeY + 0.05;
-        const rightHeelLow = rightHeelY > rightKneeY + 0.05;
-
-        // Also check if foot is relatively flat (heel and toe Y similar)
-        const leftFootFlat = Math.abs(leftHeelY - leftFootY) < 0.05;
-        const rightFootFlat = Math.abs(rightHeelY - rightFootY) < 0.05;
-
-        if (leftHeelDown && leftHeelLow && leftFootFlat && timestamp - lastHeelStrikeTime > 250) {
-          lastHeelStrikeTime = timestamp;
-          stepCount++;
-          console.log('[Gait] Left heel strike at', (timestamp/1000).toFixed(2), 's');
-          return { type: 'left_heel_strike', timestamp };
-        }
-        if (rightHeelDown && rightHeelLow && rightFootFlat && timestamp - lastHeelStrikeTime > 250) {
-          lastHeelStrikeTime = timestamp;
-          stepCount++;
-          console.log('[Gait] Right heel strike at', (timestamp/1000).toFixed(2), 's');
-          return { type: 'right_heel_strike', timestamp };
-        }
-      }
-      return null;
-    }
-
-    function ema(prev, cur, alpha = 0.2) {
-      return alpha * cur + (1 - alpha) * prev;
-    }
+    // Gait analysis helpers moved to src/analysis/*.js
 
     function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = true) {
       if (!landmarks || landmarks.length === 0) return;
@@ -1035,201 +699,7 @@
     }
 
 
-    // Charts initialization
-    function initCharts() {
-      const baseConfig = {
-        type: 'line',
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          scales: {
-            x: {
-              type: 'realtime',
-              realtime: {
-                duration: 20000, // Increase to 20 seconds
-                refresh: 1000, // Reduce frequency to 1 second
-                delay: 0,
-                frameRate: 2, // Reduce to 2 fps
-                pause: true
-              },
-              ticks: { color: '#94a3b8' },
-              grid: { color: '#334155' }
-            },
-            y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
-          },
-          plugins: {
-            legend: { labels: { color: '#cbd5e1' } },
-            streaming: {
-              frameRate: 2
-            }
-          },
-          elements: {
-            point: {
-              radius: 0 // Hide individual points
-            },
-            line: {
-              borderWidth: 3, // Thicker line
-              tension: 0.4
-            }
-          }
-        }
-      };
-
-      charts.speed = new Chart(document.getElementById('chart-speed'), {
-        ...baseConfig,
-        data: { datasets: [{ label: '歩行速度 (m/s)', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' }] },
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 0, max: 2.5 } } }
-      });
-
-      charts.cadence = new Chart(document.getElementById('chart-cadence'), {
-        ...baseConfig,
-        data: { datasets: [{ label: 'ケイデンス (steps/min)', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)' }] },
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 60, max: 160 } } }
-      });
-
-      charts.symmetry = new Chart(document.getElementById('chart-symmetry'), {
-        ...baseConfig,
-        data: { datasets: [{ label: '対称性指数 (%)', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)' }] },
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 0, max: 110 } } }
-      });
-
-      charts.trunk = new Chart(document.getElementById('chart-trunk'), {
-        ...baseConfig,
-        data: { datasets: [{ label: '体幹傾斜 (度)', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)' }] },
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 0, max: 30 } } }
-      });
-
-      charts.knee = new Chart(document.getElementById('chart-knee'), {
-        ...baseConfig,
-        data: { datasets: [
-          { label: '左膝関節 (度)', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-          { label: '右膝関節 (度)', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)' }
-        ]},
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 0, max: 90 } } }
-      });
-
-      charts.hip = new Chart(document.getElementById('chart-hip'), {
-        ...baseConfig,
-        data: { datasets: [
-          { label: '左股関節 (度)', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)' },
-          { label: '右股関節 (度)', data: [], borderColor: '#14b8a6', backgroundColor: 'rgba(20, 184, 166, 0.1)' }
-        ]},
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 0, max: 80 } } }
-      });
-
-      charts.ankle = new Chart(document.getElementById('chart-ankle'), {
-        ...baseConfig,
-        data: { datasets: [
-          { label: '左足首 (度)', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)' },
-          { label: '右足首 (度)', data: [], borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)' }
-        ]},
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 60, max: 140 } } }
-      });
-
-      charts.pelvis = new Chart(document.getElementById('chart-pelvis'), {
-        ...baseConfig,
-        data: { datasets: [{ label: '骨盤傾斜 (度)', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)' }] },
-        options: { ...baseConfig.options, scales: { ...baseConfig.options.scales, y: { ...baseConfig.options.scales.y, min: 0, max: 20 } } }
-      });
-
-      console.log('Charts initialized');
-    }
-
-    function startCharts() {
-      Object.values(charts).forEach(chart => {
-        if (chart.options.scales.x.realtime) {
-          chart.options.scales.x.realtime.pause = false;
-          chart.update('none');
-        }
-      });
-    }
-
-    function pauseCharts() {
-      Object.values(charts).forEach(chart => {
-        if (chart.options.scales.x.realtime) {
-          chart.options.scales.x.realtime.pause = true;
-          chart.update('none');
-        }
-      });
-    }
-
-    function resetCharts() {
-      // Clear all chart data
-      Object.values(charts).forEach(chart => {
-        chart.data.datasets.forEach(dataset => {
-          dataset.data = [];
-        });
-        chart.update('none');
-      });
-
-      // Pause charts after reset
-      pauseCharts();
-
-      showNotification('波形をリセットしました', 'info');
-    }
-
-    function updateCharts(dataPoint) {
-      const now = Date.now();
-
-      // Throttle chart updates to reduce clutter
-      if (now - lastChartUpdateTime < chartUpdateInterval) {
-        return;
-      }
-      lastChartUpdateTime = now;
-
-      // Validate dataPoint
-      if (!dataPoint || typeof dataPoint !== 'object') {
-        console.warn('[Chart] Invalid dataPoint:', dataPoint);
-        return;
-      }
-
-      // Chart.js realtime scale expects epoch-like timestamps (ms).
-      // In video mode we convert video time -> epoch by adding a base offset.
-      const videoTimeMs = (videoFileUrl && videoElement && !isNaN(videoElement.currentTime))
-        ? (videoElement.currentTime * 1000)
-        : 0;
-      const xValue = (videoFileUrl && videoEpochBaseMs != null)
-        ? (videoEpochBaseMs + videoTimeMs)
-        : now;
-
-      // Helper to safely add data point
-      const safeAdd = (chart, datasetIndex, value) => {
-        if (chart && chart.data.datasets[datasetIndex]) {
-          const safeValue = (typeof value === 'number' && isFinite(value)) ? value : 0;
-          chart.data.datasets[datasetIndex].data.push({ x: xValue, y: safeValue });
-        }
-      };
-
-      safeAdd(charts.speed, 0, dataPoint.speed);
-      safeAdd(charts.cadence, 0, dataPoint.cadence);
-      safeAdd(charts.symmetry, 0, dataPoint.symmetry);
-      safeAdd(charts.trunk, 0, dataPoint.trunk);
-      safeAdd(charts.pelvis, 0, dataPoint.pelvis);
-
-      if (charts.knee) {
-        safeAdd(charts.knee, 0, dataPoint.leftKnee);
-        safeAdd(charts.knee, 1, dataPoint.rightKnee);
-      }
-      if (charts.hip) {
-        safeAdd(charts.hip, 0, dataPoint.leftHip);
-        safeAdd(charts.hip, 1, dataPoint.rightHip);
-      }
-      if (charts.ankle) {
-        safeAdd(charts.ankle, 0, dataPoint.leftAnkle);
-        safeAdd(charts.ankle, 1, dataPoint.rightAnkle);
-      }
-
-      Object.values(charts).forEach(chart => {
-        if (chart) {
-          try {
-            chart.update('quiet');
-          } catch (e) {
-            console.warn('[Chart] Update error:', e);
-          }
-        }
-      });
-    }
+    // Chart lifecycle moved to src/ui/charts.js
 
 
     // Camera preview loop with pose detection
@@ -1259,7 +729,7 @@
           // Detect and draw pose in preview mode
           if (poseLandmarker) {
             try {
-              const mpTimestamp = getMediaPipeTimestamp();
+              const mpTimestamp = getCurrentMediaPipeTimestamp();
               const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
 
               if (results.landmarks && results.landmarks.length > 0) {
@@ -1296,7 +766,7 @@
                     console.log('[Preview] Speed:', speed.toFixed(3), 'm/s | Trunk:', trunkAngle.toFixed(2), '\u00b0 | deltaT:', deltaT.toFixed(1), 'ms');
                   }
 
-                  updateCharts(previewData);
+                  chartController.updateCharts(previewData);
                 }
 
                 previewPrevLandmarks = landmarks;
@@ -1340,51 +810,33 @@
           await initPoseLandmarker();
         }
 
-        const constraints = [
-          { video: { facingMode: 'user', aspectRatio: { ideal: window.innerHeight > window.innerWidth ? 9/16 : 16/9 }, frameRate: { ideal: 30, max: 30 } } },
-          { video: { facingMode: 'user' } },
-          { video: true }
-        ];
-        for (let constraint of constraints) {
-          try {
-            mediaStream = await navigator.mediaDevices.getUserMedia(constraint);
-            videoElement.srcObject = mediaStream;
-            await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
-              videoElement.onloadedmetadata = async () => {
-                try {
-                  await videoElement.play();
-                  clearTimeout(timeout);
-                  resolve();
-                } catch (e) {
-                  clearTimeout(timeout);
-                  reject(e);
-                }
-              };
-            });
-            resizeCanvas();
-            startCameraPreview();
-            startCharts(); // Start chart streaming
+        const constraints = buildCameraConstraints({
+          windowWidth: window.innerWidth,
+          windowHeight: window.innerHeight
+        });
+        mediaStream = await startCameraStreamWithFallbacks({
+          mediaDevices: navigator.mediaDevices,
+          videoElement,
+          constraints,
+          waitForVideoMetadataAndPlayFn: waitForVideoMetadataAndPlay,
+          logger: console,
+          timeoutMs: 5000
+        });
+        resizeCanvas();
+        startCameraPreview();
+        chartController.startCharts(); // Start chart streaming
 
-            // Reset button for camera mode
-            const recordBtn = document.getElementById('btn-record');
-            recordBtn.disabled = false;
-            recordBtn.textContent = '⏺ 録画';
-            recordBtn.classList.remove('btn-primary');
-            recordBtn.classList.add('btn-danger');
+        // Reset button for camera mode
+        const recordBtn = document.getElementById('btn-record');
+        setRecordButtonForCameraMode(recordBtn);
 
-            // Change button to Camera OFF
-            document.getElementById('btn-camera').textContent = '📷 カメラOFF';
-            document.getElementById('btn-camera').classList.remove('btn-primary');
-            document.getElementById('btn-camera').classList.add('btn-danger');
+        // Change button to Camera OFF
+        document.getElementById('btn-camera').textContent = '📷 カメラOFF';
+        document.getElementById('btn-camera').classList.remove('btn-primary');
+        document.getElementById('btn-camera').classList.add('btn-danger');
 
-            showNotification('カメラ起動成功', 'success');
-            return;
-          } catch (error) {
-            console.log('Constraint failed:', error);
-          }
-        }
-        throw new Error('Camera failed');
+        showNotification('カメラ起動成功', 'success');
+        return;
       } catch (error) {
         console.error('Camera error:', error);
         if (error?.code === 'POSE_INIT_FAILED') {
@@ -1396,29 +848,21 @@
     }
 
     function releaseCamera() {
-      if (previewAnimationId) {
-        cancelAnimationFrame(previewAnimationId);
-        previewAnimationId = null;
-      }
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-        mediaStream = null;
-      }
-      videoElement.srcObject = null;
-
-      // Clear canvas
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-      // Pause charts
-      pauseCharts();
-
-      // Reset camera button
-      document.getElementById('btn-camera').textContent = '📷 カメラ';
-      document.getElementById('btn-camera').classList.remove('btn-danger');
-      document.getElementById('btn-camera').classList.add('btn-primary');
-
-      // Disable record button
-      document.getElementById('btn-record').disabled = true;
+      ({
+        previewAnimationId,
+        mediaStream
+      } = releaseCameraResources({
+        previewAnimationId,
+        cancelAnimationFrameFn: cancelAnimationFrame,
+        mediaStream,
+        stopMediaStreamFn: stopMediaStream,
+        videoElement,
+        canvasCtx,
+        canvasElement,
+        chartController,
+        cameraButton: document.getElementById('btn-camera'),
+        recordButton: document.getElementById('btn-record')
+      }));
     }
 
     async function loadVideoFile() {
@@ -1431,9 +875,7 @@
         return;
       }
 
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'video/*';
+      const input = createVideoFileInput({ documentRef: document });
 
       console.log('[Video] File input created, opening dialog...');
 
@@ -1452,42 +894,29 @@
           console.log('[Video] Loading:', file.name, (file.size / (1024*1024)).toFixed(2), 'MB');
           showNotification('動画を読み込み中...', 'info');
 
-          // Cleanup
-          isAnalyzing = false;
-          isRecording = false;
-
-          if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-            animationFrameId = null;
-          }
-          if (previewAnimationId) {
-            cancelAnimationFrame(previewAnimationId);
-            previewAnimationId = null;
-          }
-          if (videoFrameCallbackHandle && videoElement.cancelVideoFrameCallback) {
-            try {
-              videoElement.cancelVideoFrameCallback(videoFrameCallbackHandle);
-            } catch (_) {}
-            videoFrameCallbackHandle = null;
-          }
-
-          if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-          }
-
-          pauseCharts();
-
-          // Release camera if active
-          if (mediaStream) {
-            releaseCamera();
-          }
-
-          clearLoadedVideoState();
-          videoElement.srcObject = null;
-          videoElement.load();
-          
-          // Disable save analyzed video button when loading new video
-          document.getElementById('btn-save-analyzed-video').disabled = true;
+          ({
+            isAnalyzing,
+            isRecording,
+            animationFrameId,
+            previewAnimationId,
+            videoFrameCallbackHandle,
+            videoFileUrl,
+            videoEpochBaseMs
+          } = prepareForVideoLoad({
+            animationFrameId,
+            previewAnimationId,
+            cancelAnimationFrameFn: cancelAnimationFrame,
+            videoElement,
+            videoFrameCallbackHandle,
+            videoFileUrl,
+            URLRef: URL,
+            logger: console,
+            mediaRecorder,
+            chartController,
+            mediaStream,
+            releaseCameraFn: releaseCamera,
+            analyzedVideoButton: document.getElementById('btn-save-analyzed-video')
+          }));
 
           // Create new video URL
           videoFileUrl = URL.createObjectURL(file);
@@ -1495,71 +924,16 @@
           console.log('[Video] Object URL created:', videoFileUrl.substring(0, 50) + '...');
 
           // iOS/Safari stability
-          videoElement.playsInline = true;
-          videoElement.setAttribute('playsinline', '');
-          videoElement.preload = 'auto';
-          videoElement.muted = true;
+          configureVideoElementForFile(videoElement);
           console.log('[Video] Video element configured');
 
           // Setup load handler (loadedmetadata can be unreliable -> fallback to canplay/loadeddata)
           console.log('[Video] Waiting for video to load...');
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              console.error('[Video] ❌ Load timeout after 30 seconds');
-              reject(new Error('Timeout'));
-            }, 30000);
-
-            let resolved = false;
-            const done = (eventName) => {
-              if (resolved) {
-                console.log('[Video] Event', eventName, 'fired but already resolved');
-                return;
-              }
-
-              console.log('[Video] Event fired:', eventName, '| readyState:', videoElement.readyState, '| dimensions:', videoElement.videoWidth, 'x', videoElement.videoHeight);
-
-              if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
-                resolved = true;
-                clearTimeout(timeout);
-                cleanup();
-                console.log('[Video] ✅ Loaded successfully:', videoElement.videoWidth, 'x', videoElement.videoHeight);
-                resolve();
-              } else {
-                console.warn('[Video] ⚠️ Event', eventName, 'fired but dimensions not ready:', videoElement.videoWidth, 'x', videoElement.videoHeight);
-              }
-            };
-
-            const onError = (e) => {
-              console.error('[Video] ❌ Load error:', e);
-              clearTimeout(timeout);
-              cleanup();
-              reject(new Error('Load failed'));
-            };
-
-            const cleanup = () => {
-              videoElement.removeEventListener('loadedmetadata', doneMetadata);
-              videoElement.removeEventListener('loadeddata', doneData);
-              videoElement.removeEventListener('canplay', doneCanplay);
-              videoElement.removeEventListener('canplaythrough', doneCanplaythrough);
-              videoElement.removeEventListener('error', onError);
-            };
-
-            const doneMetadata = () => done('loadedmetadata');
-            const doneData = () => done('loadeddata');
-            const doneCanplay = () => done('canplay');
-            const doneCanplaythrough = () => done('canplaythrough');
-
-            console.log('[Video] Setting up event listeners...');
-            videoElement.addEventListener('loadedmetadata', doneMetadata);
-            videoElement.addEventListener('loadeddata', doneData);
-            videoElement.addEventListener('canplay', doneCanplay);
-            videoElement.addEventListener('canplaythrough', doneCanplaythrough);
-            videoElement.addEventListener('error', onError);
-
-            console.log('[Video] Setting src to:', videoFileUrl.substring(0, 60) + '...');
-            videoElement.src = videoFileUrl;
-            videoElement.loop = false;
-            console.log('[Video] src set, waiting for load events...');
+          await waitForVideoLoad({
+            videoElement,
+            src: videoFileUrl,
+            timeoutMs: 30000,
+            logger: console
           });
 
           console.log('[Video] Promise resolved - video loaded');
@@ -1601,10 +975,7 @@
 
           // Update UI
           const recordBtn = document.getElementById('btn-record');
-          recordBtn.disabled = false;
-          recordBtn.textContent = '▶ 開始';
-          recordBtn.classList.remove('btn-danger');
-          recordBtn.classList.add('btn-primary');
+          setRecordButtonForVideoMode(recordBtn);
 
           showNotification('動画読み込み完了', 'success');
           console.log('[Video] Load complete - ready to start analysis');
@@ -1618,8 +989,7 @@
           clearLoadedVideoState();
 
           const recordBtn = document.getElementById('btn-record');
-          recordBtn.disabled = true;
-          recordBtn.textContent = '▶ 開始';
+          setRecordButtonForVideoMode(recordBtn, { disabled: true });
         } finally {
           // Always reset loading flag
           isLoadingVideo = false;
@@ -1642,14 +1012,17 @@
     async function finalizeSession() {
       if (analysisData.length === 0) return;
       try {
-        const sessionData = {
-          patientId: patientId,
-          plane: analysisPlane,
-          timestamp: Date.now(),
-          data: analysisData,
-          gaitEvents: gaitEvents,
-          stepCount: stepCount
-        };
+        const sessionData = buildSessionRecord({
+          patientId,
+          analysisPlane,
+          captureMode: getAnalysisSourceMode() === 'video' ? 'video' : 'camera',
+          analysisData,
+          gaitEvents,
+          stepCount,
+          analysisFrameCount,
+          sessionTimestamp: analysisStartEpochMs || Date.now(),
+          appVersion: APP_VERSION_LABEL
+        });
         const sessionId = await saveSession(sessionData);
         if (!sessionId) {
           throw createAppError('SESSION_SAVE_FAILED', 'セッション保存に失敗しました。');
@@ -1670,44 +1043,29 @@
         return false;
       }
 
-      // Cancel preview loop
-      if (previewAnimationId) {
-        cancelAnimationFrame(previewAnimationId);
-        previewAnimationId = null;
-      }
-
-      // Cancel any existing video frame callback
-      if (videoFrameCallbackHandle && videoElement.cancelVideoFrameCallback) {
-        try {
-          videoElement.cancelVideoFrameCallback(videoFrameCallbackHandle);
-        } catch (_) {}
-        videoFrameCallbackHandle = null;
-      }
+      ({
+        previewAnimationId,
+        videoFrameCallbackHandle
+      } = cancelScheduledMediaWork({
+        previewAnimationId,
+        cancelAnimationFrameFn: cancelAnimationFrame,
+        videoElement,
+        videoFrameCallbackHandle
+      }));
 
       // For video files: start playback (SIMPLIFIED)
       if (videoFileUrl) {
-        console.log('[Analysis] Video mode - starting playback');
-
-        videoElement.currentTime = 0;
-
-        // If video ended, reload it
-        if (videoElement.ended) {
-          console.log('[Analysis] Reloading ended video');
-          videoElement.load();
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
         try {
-          await videoElement.play();
-          console.log('[Analysis] Video play() succeeded');
+          ({ videoEpochBaseMs } = await startVideoPlaybackForAnalysis({
+            videoElement,
+            logger: console,
+            now: () => Date.now()
+          }));
         } catch (e) {
           console.error('[Analysis] Video play() failed:', e);
           showNotification('動画の再生に失敗しました', 'error');
           return false;
         }
-
-        // Set epoch base for chart x-axis
-        videoEpochBaseMs = Date.now();
       } else {
         videoEpochBaseMs = null;
       }
@@ -1715,74 +1073,75 @@
       // Reset analysis state
       isAnalyzing = true;
       analysisPlane = currentPlane;
-      analysisData = [];
-      prevLandmarks = null;
-      prevWorldLandmarks = null;
-      prevTimestamp = null;
-      analysisStartEpochMs = Date.now();
-      analysisStartMpTimestamp = null;
-      gaitEvents = [];
-      stepCount = 0;
-      lastHeelStrikeTime = 0;
-      Object.keys(emaValues).forEach(key => { emaValues[key] = 0; });
+      ({
+        analysisStartEpochMs,
+        analysisStartMpTimestamp,
+        analysisData,
+        prevLandmarks,
+        prevWorldLandmarks,
+        prevTimestamp,
+        gaitEvents,
+        stepCount,
+        lastHeelStrikeTime,
+        emaValues
+      } = createStartedAnalysisState({
+        createInitialEmaValues,
+        now: () => Date.now()
+      }));
 
       // Start charts
-      startCharts();
+      chartController.startCharts();
       console.log('[Analysis] Analysis started successfully');
 
       // Update button for video mode
       if (videoFileUrl) {
         const recordBtn = document.getElementById('btn-record');
-        recordBtn.textContent = '⏹ 停止';
-        recordBtn.classList.remove('btn-primary');
-        recordBtn.classList.add('btn-danger');
+        setRecordButtonForActiveAnalysis(recordBtn);
       }
 
       let frameCount = 0;
       let lastMpTimestamp = -1;
 
       const scheduleNext = () => {
-        if (!isAnalyzing) return;
-        if (videoFileUrl && videoElement.requestVideoFrameCallback) {
-          videoFrameCallbackHandle = videoElement.requestVideoFrameCallback(() => processFrame());
-        } else {
-          animationFrameId = requestAnimationFrame(processFrame);
-        }
+        ({
+          animationFrameId,
+          videoFrameCallbackHandle
+        } = scheduleAnalysisFrame({
+          isAnalyzing,
+          isVideoMode: !!videoFileUrl,
+          videoElement,
+          callback: processFrame,
+          requestAnimationFrameFn: requestAnimationFrame
+        }));
       };
 
       async function processFrame() {
-        if (!isAnalyzing) {
-          console.log('[Analysis] Stopped');
-          return;
-        }
-
         try {
-          // Wait for video to be ready
-          if (videoElement.readyState < 2) {
+          const mpTimestamp = getCurrentMediaPipeTimestamp();
+          const framePlan = prepareAnalysisFrame({
+            isAnalyzing,
+            readyState: videoElement.readyState,
+            isVideoMode: !!videoFileUrl,
+            isPaused: videoElement.paused,
+            mpTimestamp,
+            lastMpTimestamp,
+            frameCount,
+            analysisStartMpTimestamp
+          });
+          if (framePlan.shouldStop) {
+            console.log('[Analysis] Stopped');
+            return;
+          }
+          if (framePlan.shouldSkip) {
             scheduleNext();
             return;
           }
 
-          // Skip paused frames (video mode only)
-          if (videoFileUrl && videoElement.paused) {
-            scheduleNext();
-            return;
-          }
-
-          frameCount++;
-
-          const mpTimestamp = getMediaPipeTimestamp();
-          if (analysisStartMpTimestamp == null) {
-            analysisStartMpTimestamp = mpTimestamp;
-          }
-          const elapsedMs = Math.max(0, mpTimestamp - analysisStartMpTimestamp);
-
-          // Ensure monotonic timestamps for video mode
-          if (videoFileUrl && mpTimestamp <= lastMpTimestamp) {
-            scheduleNext();
-            return;
-          }
-          lastMpTimestamp = mpTimestamp;
+          frameCount = framePlan.nextFrameCount;
+          analysisFrameCount = frameCount;
+          analysisStartMpTimestamp = framePlan.nextAnalysisStartMpTimestamp;
+          const elapsedMs = framePlan.elapsedMs;
+          lastMpTimestamp = framePlan.nextLastMpTimestamp;
 
           const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
 
@@ -1808,34 +1167,24 @@
               : 0;
 
             // Use MediaPipe/video time axis for gait event timing (independent of playbackRate)
-            const gaitEvent = detectGaitEvents(landmarks, mpTimestamp);
-            if (gaitEvent) {
-              gaitEvents.push(gaitEvent);
-              console.log('[Gait Event]', gaitEvent.type, 'at', (mpTimestamp / 1000).toFixed(2), 's');
+            const gaitDetection = detectGaitEvent({
+              landmarks,
+              prevLandmarks,
+              timestamp: mpTimestamp,
+              lastHeelStrikeTime,
+              logger: console
+            });
+            lastHeelStrikeTime = gaitDetection.nextLastHeelStrikeTime;
+            stepCount += gaitDetection.stepIncrement;
+            if (gaitDetection.event) {
+              gaitEvents.push(gaitDetection.event);
+              console.log('[Gait Event]', gaitDetection.event.type, 'at', (mpTimestamp / 1000).toFixed(2), 's');
             }
 
-            // Calculate cadence from recent heel strikes
-            const timeWindow = 10000; // 10 seconds
-            const recentEvents = gaitEvents.filter(e => (mpTimestamp - e.timestamp) < timeWindow);
-
-            // Calculate cadence based on available data
-            let cadence = 0;
-            if (recentEvents.length >= 2) {
-              // Standard calculation: steps in time window
-              cadence = (recentEvents.length / (timeWindow / 1000)) * 60;
-            } else if (recentEvents.length === 1 && gaitEvents.length >= 2) {
-              // Estimate from last 2 steps
-              const lastTwo = gaitEvents.slice(-2);
-              const timeBetweenSteps = lastTwo[1].timestamp - lastTwo[0].timestamp;
-              if (timeBetweenSteps > 0 && timeBetweenSteps < 2000) { // Sanity check: steps should be < 2s apart
-                cadence = (60000 / timeBetweenSteps); // steps per minute
-              }
-            }
-
-            // Sanity check: cadence should be 60-200 steps/min
-            if (isNaN(cadence) || cadence < 60 || cadence > 200) {
-              cadence = 0;
-            }
+            const cadence = calculateCadenceFromEvents({
+              gaitEvents,
+              mpTimestamp
+            });
 
             if (angles) {
               emaValues.leftKnee = ema(emaValues.leftKnee, angles.leftKnee);
@@ -1851,26 +1200,16 @@
             emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt);
             const kneeSymmetry = angles ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee) : 100;
 
-            const dataPoint = {
-              timestamp: elapsedMs,
-              recordedAt: analysisStartEpochMs + elapsedMs,
+            const dataPoint = buildAnalysisDataPoint({
               elapsedMs,
+              analysisStartEpochMs,
               mpTimestamp,
               landmarks,
               worldLandmarks,
               angles,
-              speed: isFinite(emaValues.speed) ? Math.max(0, emaValues.speed) : 0,
-              cadence: isFinite(emaValues.cadence) ? Math.max(0, Math.min(200, emaValues.cadence)) : 0,
-              symmetry: isFinite(kneeSymmetry) ? Math.max(0, Math.min(100, kneeSymmetry)) : 100,
-              trunk: isFinite(emaValues.trunk) ? Math.max(0, Math.min(45, emaValues.trunk)) : 0,
-              pelvis: isFinite(emaValues.pelvis) ? Math.max(0, Math.min(30, emaValues.pelvis)) : 0,
-              leftKnee: isFinite(emaValues.leftKnee) ? Math.max(0, Math.min(180, emaValues.leftKnee)) : 0,
-              rightKnee: isFinite(emaValues.rightKnee) ? Math.max(0, Math.min(180, emaValues.rightKnee)) : 0,
-              leftHip: isFinite(emaValues.leftHip) ? Math.max(0, Math.min(180, emaValues.leftHip)) : 0,
-              rightHip: isFinite(emaValues.rightHip) ? Math.max(0, Math.min(180, emaValues.rightHip)) : 0,
-              leftAnkle: isFinite(emaValues.leftAnkle) ? Math.max(0, Math.min(180, emaValues.leftAnkle)) : 0,
-              rightAnkle: isFinite(emaValues.rightAnkle) ? Math.max(0, Math.min(180, emaValues.rightAnkle)) : 0
-            };
+              emaValues,
+              kneeSymmetry
+            });
 
             analysisData.push(dataPoint);
 
@@ -1879,7 +1218,7 @@
               console.log('[Analysis] Frame:', analysisData.length, '| Speed:', dataPoint.speed.toFixed(3), 'm/s | Trunk:', dataPoint.trunk.toFixed(2), '\u00b0 | Cadence:', dataPoint.cadence.toFixed(1), 'spm');
             }
 
-            updateCharts(dataPoint);
+            chartController.updateCharts(dataPoint);
 
             prevLandmarks = landmarks;
             prevWorldLandmarks = worldLandmarks;
@@ -1907,45 +1246,44 @@
     function stopAllProcessing() {
       isAnalyzing = false;
 
-      if (videoFrameCallbackHandle && videoElement.cancelVideoFrameCallback) {
-        try {
-          videoElement.cancelVideoFrameCallback(videoFrameCallbackHandle);
-        } catch (_) {}
-        videoFrameCallbackHandle = null;
-      }
-
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      if (previewAnimationId) {
-        cancelAnimationFrame(previewAnimationId);
-        previewAnimationId = null;
-      }
+      ({
+        animationFrameId,
+        previewAnimationId,
+        videoFrameCallbackHandle
+      } = cancelScheduledMediaWork({
+        animationFrameId,
+        previewAnimationId,
+        cancelAnimationFrameFn: cancelAnimationFrame,
+        videoElement,
+        videoFrameCallbackHandle
+      }));
       if (isRecording) {
         stopRecording();
       }
 
-      pauseCharts();
+      chartController.pauseCharts();
+      const postStopPlan = getPostAnalysisStopPlan({
+        hasStream: !!videoElement.srcObject,
+        hasVideoSource: !!(videoFileUrl && videoElement.src),
+        isVideoPaused: videoElement.paused,
+        hasAnalysisData: analysisData.length > 0
+      });
 
-      // Restart preview only if camera is active
-      if (videoElement.srcObject) {
+      if (postStopPlan.restartPreview) {
         startCameraPreview();
-      } else if (videoFileUrl && videoElement.src) {
-        if (!videoElement.paused) {
+      } else if (postStopPlan.restoreVideoRecordButton) {
+        if (postStopPlan.pauseVideo) {
           videoElement.pause();
         }
-        // Update button for video mode
         const recordBtn = document.getElementById('btn-record');
-        recordBtn.textContent = '▶ 開始';
-        recordBtn.classList.remove('btn-danger');
-        recordBtn.classList.add('btn-primary');
+        setRecordButtonForVideoMode(recordBtn);
       }
 
-      if (analysisData.length > 0) {
-        document.getElementById('btn-csv').disabled = false;
-        document.getElementById('btn-report').disabled = false;
-      }
+      enableAnalysisExportButtons({
+        csvButton: document.getElementById('btn-csv'),
+        reportButton: document.getElementById('btn-report'),
+        hasAnalysisData: postStopPlan.enableExports
+      });
     }
 
     // Recording
@@ -1979,25 +1317,15 @@
         const stream = canvasElement.captureStream(30);
         console.log('[Recording] Stream captured');
 
-        // Select MIME type (MP4 preferred)
-        const mp4Types = ['video/mp4', 'video/mp4;codecs=h264', 'video/mp4;codecs=avc1'];
-        let mimeType = mp4Types.find(type => MediaRecorder.isTypeSupported(type));
-
-        if (!mimeType) {
-          mimeType = 'video/webm;codecs=vp9';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm';
-          }
-        }
-
-        recordingMimeType = mimeType;
-        console.log('[Recording] MIME type:', mimeType);
-
-        // Create MediaRecorder
-        mediaRecorder = new MediaRecorder(stream, {
-          mimeType: mimeType,
+        ({
+          mimeType: recordingMimeType,
+          recorder: mediaRecorder
+        } = createCanvasRecordingSession({
+          stream,
+          MediaRecorderCtor: MediaRecorder,
           videoBitsPerSecond: 2500000
-        });
+        }));
+        console.log('[Recording] MIME type:', recordingMimeType);
         recordedChunks = [];
 
         mediaRecorder.ondataavailable = (event) => {
@@ -2029,17 +1357,15 @@
             return;
           }
           const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-          const minutes = Math.floor(elapsed / 60);
-          const seconds = elapsed % 60;
-          recordingInfo.textContent = `⏺ ${minutes}:${seconds.toString().padStart(2, '0')} | ${analysisData.length}点`;
+          recordingInfo.textContent = formatRecordingInfoText({
+            elapsedSeconds: elapsed,
+            pointCount: analysisData.length
+          });
         }, 1000);
 
         // Update button UI
         const recordBtn = document.getElementById('btn-record');
-        recordBtn.textContent = '⏹ 停止';
-        recordBtn.classList.remove('btn-danger');
-        recordBtn.classList.remove('btn-primary');
-        recordBtn.classList.add('btn-secondary');
+        setRecordButtonForActiveRecording(recordBtn);
 
         console.log('[Recording] Started');
 
@@ -2069,22 +1395,12 @@
 
         // Update button UI (restore based on mode)
         const recordBtn = document.getElementById('btn-record');
-        if (getSourceMode() === 'video') {
-          // Video mode
-          recordBtn.textContent = '▶ 開始';
-          recordBtn.classList.remove('btn-danger', 'btn-secondary');
-          recordBtn.classList.add('btn-primary');
+        if (getAnalysisSourceMode() === 'video') {
+          setRecordButtonForVideoMode(recordBtn);
         } else if (videoElement.srcObject) {
-          // Camera mode
-          recordBtn.textContent = '⏺ 録画';
-          recordBtn.classList.remove('btn-primary', 'btn-secondary');
-          recordBtn.classList.add('btn-danger');
+          setRecordButtonForCameraMode(recordBtn);
         } else {
-          // Neither - disable
-          recordBtn.disabled = true;
-          recordBtn.textContent = '⏺ 録画';
-          recordBtn.classList.remove('btn-primary', 'btn-danger', 'btn-secondary');
-          recordBtn.classList.add('btn-danger');
+          disableRecordButton(recordBtn);
         }
 
         console.log('[Recording] Stopped successfully');
@@ -2094,53 +1410,39 @@
     function showSaveRecordingDialog() {
       if (!recordedVideoBlob) return;
 
-      // Calculate file size
-      const sizeInMB = (recordedVideoBlob.size / (1024 * 1024)).toFixed(2);
-      document.getElementById('recording-size').textContent = `${sizeInMB} MB`;
-
-      // Determine format
-      const isMP4 = recordingMimeType.includes('mp4');
-      const formatText = isMP4 ? 'MP4 (推奨)' : 'WebM';
-      document.getElementById('recording-format').textContent = formatText;
-
-      // Generate filename
-      const date = new Date();
-      const dateStr = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0') + String(date.getDate()).padStart(2, '0');
-      const extension = isMP4 ? 'mp4' : 'webm';
-      const filename = `gait_${patientId}_${dateStr}.${extension}`;
-      document.getElementById('recording-filename').textContent = filename;
-
-      // Show modal
-      document.getElementById('save-recording-modal').classList.add('show');
+      showRecordingSaveDialog({
+        documentRef: document,
+        metadata: buildRecordingMetadata({
+        recordedVideoBlob,
+        recordingMimeType,
+        patientId
+        })
+      });
     }
 
     function saveRecordedVideo() {
       if (!recordedVideoBlob) return;
 
-      const url = URL.createObjectURL(recordedVideoBlob);
-      const a = document.createElement('a');
-      a.href = url;
-
-      const date = new Date();
-      const dateStr = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0') + String(date.getDate()).padStart(2, '0');
-      const extension = recordingMimeType.includes('mp4') ? 'mp4' : 'webm';
-      a.download = `gait_${patientId}_${dateStr}.${extension}`;
-
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+      downloadBlob({
+        blob: recordedVideoBlob,
+        filename: buildRecordingFilename({
+          patientId,
+          mimeType: recordingMimeType
+        }),
+        URLRef: URL,
+        documentRef: document
+      });
 
       // Clean up
-      recordedVideoBlob = null;
-      recordedChunks = [];
-      document.getElementById('save-recording-modal').classList.remove('show');
+      ({ recordedVideoBlob, recordedChunks } = resetRecordedVideoState());
+      closeSaveRecordingDialog({ documentRef: document });
 
       showNotification('録画を保存しました', 'success');
     }
 
     function discardRecordedVideo() {
-      recordedVideoBlob = null;
-      recordedChunks = [];
-      document.getElementById('save-recording-modal').classList.remove('show');
+      ({ recordedVideoBlob, recordedChunks } = resetRecordedVideoState());
+      closeSaveRecordingDialog({ documentRef: document });
       showNotification('録画を破棄しました', 'info');
     }
 
@@ -2169,20 +1471,13 @@
         // Get canvas stream for analyzed playback capture
         const stream = canvasElement.captureStream(30);
 
-        // Select MIME type (MP4 preferred)
-        const mp4Types = ['video/mp4', 'video/mp4;codecs=h264', 'video/mp4;codecs=avc1'];
-        let mimeType = mp4Types.find(type => MediaRecorder.isTypeSupported(type));
-
-        if (!mimeType) {
-          mimeType = 'video/webm;codecs=vp9';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm';
-          }
-        }
-
         const chunks = [];
-        const recorder = new MediaRecorder(stream, {
-          mimeType: mimeType,
+        const {
+          mimeType,
+          recorder
+        } = createCanvasRecordingSession({
+          stream,
+          MediaRecorderCtor: MediaRecorder,
           videoBitsPerSecond: 2500000
         });
 
@@ -2191,29 +1486,27 @@
         let exportFinished = false;
 
         const cancelExportLoop = () => {
-          if (exportFrameHandle && videoElement.cancelVideoFrameCallback) {
-            try {
-              videoElement.cancelVideoFrameCallback(exportFrameHandle);
-            } catch (_) {}
-          } else if (exportFrameHandle) {
-            cancelAnimationFrame(exportFrameHandle);
-          }
-          exportFrameHandle = null;
+          exportFrameHandle = cancelScheduledHandle({
+            handle: exportFrameHandle,
+            videoElement,
+            preferVideoFrameCallback: !!videoElement.requestVideoFrameCallback,
+            cancelAnimationFrameFn: cancelAnimationFrame
+          });
         };
 
         const renderExportFrame = () => {
           if (!exportActive) return;
 
           const elapsedMs = Math.max(0, videoElement.currentTime * 1000);
-          const dataPoint = findClosestAnalysisPoint(elapsedMs);
+          const dataPoint = findClosestAnalysisPoint(analysisData, elapsedMs);
           renderAnalysisFrameFromData(dataPoint);
 
           if (!videoElement.ended && !videoElement.paused) {
-            if (videoElement.requestVideoFrameCallback) {
-              exportFrameHandle = videoElement.requestVideoFrameCallback(() => renderExportFrame());
-            } else {
-              exportFrameHandle = requestAnimationFrame(renderExportFrame);
-            }
+            exportFrameHandle = scheduleMediaWork({
+              videoElement,
+              callback: renderExportFrame,
+              requestAnimationFrameFn: requestAnimationFrame
+            });
           }
         };
 
@@ -2228,7 +1521,7 @@
           videoElement.pause();
           videoElement.currentTime = Math.min(previousTime, videoElement.duration || previousTime || 0);
           await new Promise(resolve => setTimeout(resolve, 0));
-          const restorePoint = findClosestAnalysisPoint(videoElement.currentTime * 1000);
+          const restorePoint = findClosestAnalysisPoint(analysisData, videoElement.currentTime * 1000);
           renderAnalysisFrameFromData(restorePoint);
           if (!previousPaused) {
             videoElement.pause();
@@ -2243,17 +1536,15 @@
 
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: mimeType });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-
-          const date = new Date();
-          const dateStr = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0') + String(date.getDate()).padStart(2, '0');
-          const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
-          a.download = `gait_analyzed_${patientId}_${dateStr}.${extension}`;
-
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 100);
+          downloadBlob({
+            blob,
+            filename: buildAnalyzedVideoFilename({
+              patientId,
+              mimeType
+            }),
+            URLRef: URL,
+            documentRef: document
+          });
 
           showNotification('解析動画を保存しました', 'success');
         };
@@ -2268,7 +1559,7 @@
         // Reset video to beginning and replay with stored analysis overlay
         videoElement.currentTime = 0;
         videoElement.muted = true;
-        renderAnalysisFrameFromData(findClosestAnalysisPoint(0));
+        renderAnalysisFrameFromData(findClosestAnalysisPoint(analysisData, 0));
         recorder.start();
         exportActive = true;
         renderExportFrame();
@@ -2291,21 +1582,18 @@
         showNotification('エクスポートするデータがありません', 'error');
         return;
       }
-      // UTF-8 BOM + Header
-      const BOM = '\uFEFF';
-      let csv = BOM + 'elapsed_ms,speed_m_s,cadence_spm,symmetry_pct,trunk_deg,pelvis_deg,left_knee_deg,right_knee_deg,left_hip_deg,right_hip_deg,left_ankle_deg,right_ankle_deg\n';
-      analysisData.forEach(data => {
-        csv += `${Math.round(data.elapsedMs ?? data.timestamp ?? 0)},${data.speed.toFixed(3)},${data.cadence.toFixed(1)},${data.symmetry.toFixed(1)},${data.trunk.toFixed(2)},${data.pelvis.toFixed(2)},${data.leftKnee.toFixed(2)},${data.rightKnee.toFixed(2)},${data.leftHip.toFixed(2)},${data.rightHip.toFixed(2)},${data.leftAnkle.toFixed(2)},${data.rightAnkle.toFixed(2)}\n`;
-      });
+      const csv = buildAnalysisCsv(analysisData);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const date = new Date();
-      const dateStr = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0') + String(date.getDate()).padStart(2, '0');
-      a.download = `gait_${patientId}_${dateStr}.csv`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+      downloadBlobFile({
+        blob,
+        filename: buildCsvExportFilename({
+          patientId,
+          date: new Date()
+        }),
+        URLRef: URL,
+        documentRef: document,
+        revokeDelayMs: 100
+      });
       showNotification('CSVエクスポート完了', 'success');
     }
 
@@ -2326,36 +1614,26 @@
 
         const imgData = canvas.toDataURL('image/png');
 
-        // Calculate PDF dimensions
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
-        const imgWidth = pdfWidth - 20; // 10mm margin on each side
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-        // Multi-page export to keep text readable
-        let remainingHeight = imgHeight;
-        let offsetY = 10;
-        let sourceOffset = 0;
-        const printableHeight = pdfHeight - 20;
-
-        pdf.addImage(imgData, 'PNG', 10, offsetY, imgWidth, imgHeight);
-        remainingHeight -= printableHeight;
-
-        while (remainingHeight > 0) {
-          pdf.addPage();
-          sourceOffset += printableHeight;
-          pdf.addImage(imgData, 'PNG', 10, 10 - sourceOffset, imgWidth, imgHeight);
-          remainingHeight -= printableHeight;
-        }
+        const layout = buildPdfImageLayout({
+          canvasWidth: canvas.width,
+          canvasHeight: canvas.height,
+          pageWidth: pdf.internal.pageSize.getWidth(),
+          pageHeight: pdf.internal.pageSize.getHeight(),
+          margin: 10
+        });
+        applyPdfImageLayout({
+          pdf,
+          imgData,
+          layout
+        });
 
         // Generate filename
-        const date = new Date();
-        const dateStr = date.getFullYear() +
-                       String(date.getMonth() + 1).padStart(2, '0') +
-                       String(date.getDate()).padStart(2, '0');
-        const filename = `gait_report_${patientId}_${dateStr}.pdf`;
+        const filename = buildPdfReportFilename({
+          patientId,
+          date: new Date()
+        });
 
         pdf.save(filename);
         showNotification('PDF保存完了', 'success');
@@ -2516,334 +1794,68 @@
         return;
       }
 
-      const reportPlane = analysisPlane || currentPlane;
+      const summary = createReportSummary({
+        analysisData,
+        analysisPlane,
+        currentPlane,
+        patientId,
+        stepCount,
+        sessionTimestamp: analysisStartEpochMs,
+        captureMode: getAnalysisSourceMode() === 'video' ? 'video' : 'camera',
+        totalProcessedFrames: analysisFrameCount,
+        gaitEvents,
+        appVersion: APP_VERSION_LABEL
+      });
 
-      const averageMetric = (key, { excludeZero = false } = {}) => {
-        const values = analysisData
-          .map(d => d[key])
-          .filter(value => typeof value === 'number' && isFinite(value) && (!excludeZero || value > 0));
-        const fallbackValues = values.length > 0
-          ? values
-          : analysisData
-              .map(d => d[key])
-              .filter(value => typeof value === 'number' && isFinite(value));
-        if (fallbackValues.length === 0) return 0;
-        return fallbackValues.reduce((sum, value) => sum + value, 0) / fallbackValues.length;
-      };
+      const reportHTML = buildReportHtml(summary);
 
-      // Calculate averages
-      const avgSpeed = averageMetric('speed', { excludeZero: true });
-      const avgCadence = averageMetric('cadence', { excludeZero: true });
-      const avgSymmetry = averageMetric('symmetry');
-      const avgTrunk = averageMetric('trunk');
-      const avgLeftKnee = averageMetric('leftKnee', { excludeZero: true });
-      const avgRightKnee = averageMetric('rightKnee', { excludeZero: true });
-      const avgLeftHip = averageMetric('leftHip', { excludeZero: true });
-      const avgRightHip = averageMetric('rightHip', { excludeZero: true });
-      const avgPelvis = averageMetric('pelvis');
-      const avgLeftAnkle = averageMetric('leftAnkle', { excludeZero: true });
-      const avgRightAnkle = averageMetric('rightAnkle', { excludeZero: true });
-      const durationMs = analysisData.length > 0
-        ? Math.max(...analysisData.map(d => d.elapsedMs ?? d.timestamp ?? 0))
-        : 0;
+      setReportHtml({
+        documentRef: document,
+        reportHTML
+      });
 
-      // Calculate max/min for ranges
-      const maxSpeed = Math.max(...analysisData.map(d => d.speed));
-      const minSpeed = Math.min(...analysisData.map(d => d.speed));
-
-      // Calculate left-right differences
-      const kneeDiff = Math.abs(avgLeftKnee - avgRightKnee);
-      const hipDiff = Math.abs(avgLeftHip - avgRightHip);
-      const ankleDiff = Math.abs(avgLeftAnkle - avgRightAnkle);
-
-      // Evaluation function (simplified for compact display)
-      function evaluateMetric(value, normalMin, normalMax, unit = '') {
-        if (value >= normalMin && value <= normalMax) {
-          return `<span style="color: #10b981;">🟢 正常</span>`;
-        } else if (value < normalMin - 10 || value > normalMax + 10) {
-          return `<span style="color: #ef4444;">🔴 要注意</span>`;
-        } else {
-          return `<span style="color: #f59e0b;">🟡 やや逸脱</span>`;
-        }
-      }
-
-      function evaluateDifference(diff, threshold = 10) {
-        if (diff <= threshold) {
-          return `<span style="color: #10b981;">🟢 良好</span>`;
-        } else if (diff <= threshold * 2) {
-          return `<span style="color: #f59e0b;">🟡 やや差あり</span>`;
-        } else {
-          return `<span style="color: #ef4444;">🔴 左右差大</span>`;
-        }
-      }
-
-      // Generate comments
-      let comments = [];
-
-      if (reportPlane === 'frontal') {
-        if (avgSpeed < 0.8) {
-          comments.push('⚠️ 歩行速度が遅い傾向にあります。筋力強化トレーニングを推奨します。');
-        } else if (avgSpeed > 1.5) {
-          comments.push('✅ 歩行速度は良好です。');
-        }
-
-        if (avgSymmetry < 85) {
-          comments.push('⚠️ 対称性が低下しています。片側に負荷が偏っている可能性があります。');
-        } else if (avgSymmetry > 95) {
-          comments.push('✅ 左右対称性は非常に良好です。');
-        }
-
-        if (avgTrunk > 15) {
-          comments.push('⚠️ 体幹の傾斜が大きいです。体幹安定性のトレーニングを推奨します。');
-        }
-
-        if (avgCadence < 100) {
-          comments.push('⚠️ ケイデンスが低めです。歩行リズムの改善が推奨されます。');
-        } else if (avgCadence > 120) {
-          comments.push('✅ ケイデンスは良好な範囲です。');
-        }
-      } else {
-        if (kneeDiff > 15) {
-          comments.push('⚠️ 左右の膝関節角度に大きな差があります。');
-        } else {
-          comments.push('✅ 左右の膝関節角度差は小さく、安定しています。');
-        }
-
-        if (hipDiff > 15) {
-          comments.push('⚠️ 股関節角度の左右差が大きく、骨盤代償の確認が必要です。');
-        }
-
-        if (ankleDiff > 10) {
-          comments.push('⚠️ 足関節角度の左右差が大きく、蹴り出しの非対称性が疑われます。');
-        }
-
-        if (avgPelvis > 10) {
-          comments.push('⚠️ 骨盤傾斜が大きめです。体幹・骨盤の安定性を確認してください。');
-        }
-      }
-
-      if (comments.length === 0) {
-        comments.push('✅ 全体的に良好な歩行パターンです。');
-      }
-
-      // Generate report HTML - Compact A4-optimized layout
-      const reportSummaryHTML = reportPlane === 'frontal'
-        ? `
-          <h2>📊 主要指標</h2>
-          <div class="report-metrics">
-            <div class="report-metric-card">
-              <div class="report-metric-label">歩行速度</div>
-              <div class="report-metric-value">${avgSpeed.toFixed(2)} m/s</div>
-              <div class="report-metric-eval">${evaluateMetric(avgSpeed, 0.8, 1.4, '')}</div>
-            </div>
-            <div class="report-metric-card">
-              <div class="report-metric-label">ケイデンス</div>
-              <div class="report-metric-value">${avgCadence.toFixed(0)} spm</div>
-              <div class="report-metric-eval">${evaluateMetric(avgCadence, 100, 130, '')}</div>
-            </div>
-            <div class="report-metric-card">
-              <div class="report-metric-label">対称性</div>
-              <div class="report-metric-value">${avgSymmetry.toFixed(1)} %</div>
-              <div class="report-metric-eval">${evaluateMetric(avgSymmetry, 90, 100, '')}</div>
-            </div>
-            <div class="report-metric-card">
-              <div class="report-metric-label">体幹傾斜</div>
-              <div class="report-metric-value">${avgTrunk.toFixed(1)}°</div>
-              <div class="report-metric-eval">${evaluateMetric(avgTrunk, 0, 10, '')}</div>
-            </div>
-          </div>
-        `
-        : `
-          <h2>📊 主要指標</h2>
-          <div class="report-metrics">
-            <div class="report-metric-card">
-              <div class="report-metric-label">左膝</div>
-              <div class="report-metric-value">${avgLeftKnee.toFixed(1)}°</div>
-              <div class="report-metric-eval">${evaluateMetric(avgLeftKnee, 0, 80, '')}</div>
-            </div>
-            <div class="report-metric-card">
-              <div class="report-metric-label">右膝</div>
-              <div class="report-metric-value">${avgRightKnee.toFixed(1)}°</div>
-              <div class="report-metric-eval">${evaluateMetric(avgRightKnee, 0, 80, '')}</div>
-            </div>
-            <div class="report-metric-card">
-              <div class="report-metric-label">骨盤傾斜</div>
-              <div class="report-metric-value">${avgPelvis.toFixed(1)}°</div>
-              <div class="report-metric-eval">${evaluateMetric(avgPelvis, 0, 10, '')}</div>
-            </div>
-            <div class="report-metric-card">
-              <div class="report-metric-label">左右膝差</div>
-              <div class="report-metric-value">${kneeDiff.toFixed(1)}°</div>
-              <div class="report-metric-eval">${evaluateDifference(kneeDiff)}</div>
-            </div>
-          </div>
-        `;
-
-      const reportHTML = `
-        <div class="report-compact">
-          <h1>📄 Gait VISION forPT - 分析レポート</h1>
-
-          <div class="report-info-grid">
-            <div class="report-info-item">
-              <div class="report-info-label">対象者ID</div>
-              <div class="report-info-value">${patientId}</div>
-            </div>
-            <div class="report-info-item">
-              <div class="report-info-label">分析平面</div>
-              <div class="report-info-value">${reportPlane === 'frontal' ? '前額面' : '矢状面'}</div>
-            </div>
-            <div class="report-info-item">
-              <div class="report-info-label">分析日時</div>
-              <div class="report-info-value">${new Date().toLocaleDateString('ja-JP')}</div>
-            </div>
-          </div>
-
-          ${reportSummaryHTML}
-
-          <h2>📊 関節角度比較</h2>
-          <div class="report-charts-row">
-            <div class="report-chart-box">
-              <canvas id="report-knee-chart" class="report-chart-mini"></canvas>
-            </div>
-            <div class="report-chart-box">
-              <canvas id="report-hip-chart" class="report-chart-mini"></canvas>
-            </div>
-          </div>
-
-          <h2>📈 時系列推移</h2>
-          <div class="report-chart-box">
-            <canvas id="report-timeline-chart" class="report-chart-mini"></canvas>
-          </div>
-
-          <h2>🦵 関節角度詳細</h2>
-          <table class="report-table">
-            <thead>
-              <tr>
-                <th>関節</th>
-                <th>左 (°)</th>
-                <th>右 (°)</th>
-                <th>評価</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>膝関節</td>
-                <td>${avgLeftKnee.toFixed(1)}</td>
-                <td>${avgRightKnee.toFixed(1)}</td>
-                <td>${evaluateDifference(kneeDiff)}</td>
-              </tr>
-              <tr>
-                <td>股関節</td>
-                <td>${avgLeftHip.toFixed(1)}</td>
-                <td>${avgRightHip.toFixed(1)}</td>
-                <td>${evaluateDifference(hipDiff)}</td>
-              </tr>
-              <tr>
-                <td>足首</td>
-                <td>${avgLeftAnkle.toFixed(1)}</td>
-                <td>${avgRightAnkle.toFixed(1)}</td>
-                <td>${evaluateDifference(ankleDiff, 5)}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <h2>💡 分析コメント</h2>
-          <div class="report-comments">
-            ${comments.map(c => `• ${c}`).join('<br>')}
-          </div>
-
-          <p style="text-align: center; font-size: 0.75rem; color: #475569; margin-top: 1rem;">
-            データ数: ${analysisData.length}点 | 歩数: ${stepCount}歩 | 時間: ${(durationMs / 1000).toFixed(1)}秒
-          </p>
-        </div>
-      `;
-
-      // Update both preview and print content
-      document.getElementById('report-preview').innerHTML = reportHTML;
-      document.getElementById('report-content').innerHTML = reportHTML;
-
-      // Render mini charts after DOM update
       setTimeout(() => {
-        renderReportCharts(avgLeftKnee, avgRightKnee, avgLeftHip, avgRightHip, avgLeftAnkle, avgRightAnkle);
+        renderReportCharts(summary.avgLeftKnee, summary.avgRightKnee, summary.avgLeftHip, summary.avgRightHip, summary.avgLeftAnkle, summary.avgRightAnkle);
       }, 100);
 
-      // Show modal
-      document.getElementById('report-modal').classList.add('show');
+      openReportModal({ documentRef: document });
       showNotification('レポートを表示しました', 'success');
     }
 
     // Event listeners
     // Check if user has already consented
-    const hasConsented = localStorage.getItem('hasConsented');
-    if (hasConsented === 'true') {
-      document.getElementById('consent-screen').classList.add('hidden');
-      document.getElementById('patient-screen').classList.remove('hidden');
-    }
-
-    document.getElementById('consent-btn').addEventListener('click', () => {
-      localStorage.setItem('hasConsented', 'true'); // Remember consent
-      document.getElementById('consent-screen').classList.add('hidden');
-      document.getElementById('patient-screen').classList.remove('hidden');
+    restoreScreenState({
+      documentRef: document,
+      hasConsented: hasStoredConsent({ localStorageRef: localStorage })
     });
 
-    // Validate patient ID function
-    function validatePatientId(id) {
-      const trimmedId = id.trim();
-
-      // Empty check
-      if (trimmedId.length === 0) {
-        return { valid: false, error: '対象者IDを入力してください' };
-      }
-
-      // Japanese characters (Hiragana, Katakana, Kanji)
-      if (/[぀-ゟ゠-ヿ一-龯㐀-䶿]/.test(trimmedId)) {
-        return { valid: false, error: '❌ 日本語（氏名）は使用できません。匿名コード（例: PT-00001）を使用してください。' };
-      }
-
-      // Phone number patterns
-      if (/^[\d\-\(\)\s]+$/.test(trimmedId) && /\d{3,4}/.test(trimmedId)) {
-        return { valid: false, error: '❌ 電話番号は使用できません。匿名コード（例: PT-00001）を使用してください。' };
-      }
-
-      // Email address pattern
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedId)) {
-        return { valid: false, error: '❌ メールアドレスは使用できません。匿名コード（例: PT-00001）を使用してください。' };
-      }
-
-      // URL pattern
-      if (/^(https?:\/\/|www\.)/.test(trimmedId)) {
-        return { valid: false, error: '❌ URLは使用できません。匿名コード（例: PT-00001）を使用してください。' };
-      }
-
-      return { valid: true, error: null };
-    }
+    document.getElementById('consent-btn').addEventListener('click', () => {
+      persistConsent({ localStorageRef: localStorage });
+      showPatientScreen({ documentRef: document });
+    });
 
     const patientIdInput = document.getElementById('patient-id-input');
     const patientSubmitBtn = document.getElementById('patient-submit-btn');
     const patientIdError = document.getElementById('patient-id-error');
 
     // Load last patient ID from localStorage
-    const lastPatientId = localStorage.getItem('lastPatientId');
-    if (lastPatientId) {
-      patientIdInput.value = lastPatientId;
-      // Validate the loaded ID before enabling the button
-      const validation = validatePatientId(lastPatientId);
-      patientSubmitBtn.disabled = !validation.valid;
+    const storedPatient = buildStoredPatientIdState({
+      localStorageRef: localStorage,
+      validatePatientId
+    });
+    if (storedPatient.value) {
+      patientIdInput.value = storedPatient.value;
+      patientSubmitBtn.disabled = storedPatient.submitDisabled;
     }
 
     patientIdInput.addEventListener('input', (e) => {
       const validation = validatePatientId(e.target.value);
-
-      if (validation.valid) {
-        patientSubmitBtn.disabled = false;
-        patientIdError.style.display = 'none';
-        patientIdInput.style.borderColor = '#10b981';
-      } else {
-        patientSubmitBtn.disabled = true;
-        patientIdError.textContent = validation.error;
-        patientIdError.style.display = validation.error ? 'block' : 'none';
-        patientIdInput.style.borderColor = validation.error ? '#ef4444' : '#475569';
-      }
+      applyPatientValidationUI({
+        patientSubmitBtn,
+        patientIdError,
+        patientIdInput,
+        validation
+      });
     });
 
     // Patient ID edit functionality
@@ -2856,8 +1868,8 @@
           return;
         }
         patientId = newId.trim();
-        localStorage.setItem('lastPatientId', patientId);
-        document.getElementById('patient-display').textContent = '対象者ID: ' + patientId;
+        persistPatientId({ localStorageRef: localStorage, patientId });
+        document.getElementById('patient-display').textContent = formatPatientDisplay(patientId);
         showNotification('対象者IDを変更しました', 'success');
       }
     });
@@ -2870,16 +1882,14 @@
       }
 
       patientId = patientIdInput.value.trim();
-      localStorage.setItem('lastPatientId', patientId); // Remember patient ID
-      document.getElementById('patient-display').textContent = '対象者ID: ' + patientId;
-      document.getElementById('patient-screen').classList.add('hidden');
-      document.getElementById('main-app').classList.remove('hidden');
-      fpsDisplay.style.color = '#10b981';
+      persistPatientId({ localStorageRef: localStorage, patientId });
+      document.getElementById('patient-display').textContent = formatPatientDisplay(patientId);
+      showMainApp({ documentRef: document, fpsDisplay });
       try {
         await initPoseLandmarker();
-        initCharts(); // Initialize charts immediately in static state
+        chartController.initCharts(); // Initialize charts immediately in static state
         resizeCanvas();
-        updateOrientationWarning();
+        syncOrientationWarning();
         showNotification('初期化完了', 'success');
       } catch (error) {
         console.error('Init error:', error);
@@ -2891,23 +1901,25 @@
 
     document.getElementById('btn-frontal').addEventListener('click', () => {
       currentPlane = 'frontal';
-      document.getElementById('btn-frontal').classList.remove('btn-secondary');
-      document.getElementById('btn-frontal').classList.add('btn-primary');
-      document.getElementById('btn-sagittal').classList.remove('btn-primary');
-      document.getElementById('btn-sagittal').classList.add('btn-secondary');
-      document.getElementById('charts-container').classList.remove('plane-sagittal');
-      updateOrientationWarning();
+      applyPlaneModeUI({
+        frontalButton: document.getElementById('btn-frontal'),
+        sagittalButton: document.getElementById('btn-sagittal'),
+        chartsContainer: document.getElementById('charts-container'),
+        currentPlane
+      });
+      syncOrientationWarning();
       showNotification('前額面モード', 'success');
     });
 
     document.getElementById('btn-sagittal').addEventListener('click', () => {
       currentPlane = 'sagittal';
-      document.getElementById('btn-sagittal').classList.remove('btn-secondary');
-      document.getElementById('btn-sagittal').classList.add('btn-primary');
-      document.getElementById('btn-frontal').classList.remove('btn-primary');
-      document.getElementById('btn-frontal').classList.add('btn-secondary');
-      document.getElementById('charts-container').classList.add('plane-sagittal');
-      updateOrientationWarning();
+      applyPlaneModeUI({
+        frontalButton: document.getElementById('btn-frontal'),
+        sagittalButton: document.getElementById('btn-sagittal'),
+        chartsContainer: document.getElementById('charts-container'),
+        currentPlane
+      });
+      syncOrientationWarning();
       showNotification('矢状面モード', 'success');
     });
 
@@ -2936,7 +1948,7 @@
 
     document.getElementById('btn-record').addEventListener('click', async () => {
       // Video mode: start/stop analysis
-      if (getSourceMode() === 'video') {
+      if (getAnalysisSourceMode() === 'video') {
         if (isAnalyzing) {
           // Stop analysis
           stopAllProcessing();
@@ -2961,14 +1973,13 @@
     document.getElementById('btn-report-print').addEventListener('click', () => window.print());
     document.getElementById('btn-report-pdf').addEventListener('click', exportReportToPDF);
     document.getElementById('btn-report-close').addEventListener('click', () => {
-      document.getElementById('report-modal').classList.remove('show');
+      closeReportModal({ documentRef: document });
     });
 
     document.getElementById('btn-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-report').addEventListener('click', generateReport);
-    document.getElementById('btn-reset-charts').addEventListener('click', resetCharts);
+    document.getElementById('btn-reset-charts').addEventListener('click', () => chartController.resetCharts());
     document.getElementById('btn-export').addEventListener('click', exportAllData);
-
     document.getElementById('btn-settings').addEventListener('click', async () => {
       const options = [
         '1. すべての分析データを削除',
@@ -3014,105 +2025,36 @@
       }
     });
 
+    setupInstallPrompt({
+      windowRef: window,
+      navigatorRef: navigator,
+      installButton,
+      showNotification,
+      logger: console
+    });
+
+    registerAppServiceWorker({
+      windowRef: window,
+      navigatorRef: navigator,
+      documentRef: document,
+      showNotification,
+      logger: console
+    });
+
     window.addEventListener('resize', () => {
       resizeCanvas();
-      updateOrientationWarning();
+      syncOrientationWarning();
     });
     window.addEventListener('orientationchange', updateOrientationWarning);
 
     // Memory cleanup every 5 minutes (idle only, never interrupt an active session)
     setInterval(async () => {
-      if (!isRecording && !isAnalyzing && getSourceMode() === 'idle' && poseLandmarker) {
+      if (!isRecording && !isAnalyzing && getAnalysisSourceMode() === 'idle' && poseLandmarker) {
         await initPoseLandmarker();
       }
     }, 300000);
 
     console.log('Gait VISION forPT initialized successfully');
-
-    // Register Service Worker for offline support
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', async () => {
-        try {
-          const registration = await navigator.serviceWorker.register('./sw.js', {
-            scope: './'
-          });
-          console.log('[Service Worker] Registered successfully:', registration.scope);
-
-          // Update cache status indicator
-          const updateCacheStatus = async () => {
-            try {
-              const cacheNames = await caches.keys();
-              const gaitCaches = cacheNames.filter(name => name.startsWith('gait-vision-cache-'));
-              const cacheStatusEl = document.getElementById('cache-status');
-
-              if (gaitCaches.length > 0) {
-                // Get the most recent cache
-                const latestCache = gaitCaches[gaitCaches.length - 1];
-                const cache = await caches.open(latestCache);
-                const keys = await cache.keys();
-
-                if (keys.length > 0) {
-                  cacheStatusEl.textContent = `📦 キャッシュ済み (${keys.length}個)`;
-                  cacheStatusEl.style.color = '#10b981';
-                  cacheStatusEl.style.display = 'inline';
-                } else {
-                  cacheStatusEl.textContent = '⏳ キャッシュ中...';
-                  cacheStatusEl.style.color = '#f59e0b';
-                  cacheStatusEl.style.display = 'inline';
-                }
-              } else {
-                cacheStatusEl.textContent = '⏳ 初回キャッシュ中...';
-                cacheStatusEl.style.color = '#f59e0b';
-                cacheStatusEl.style.display = 'inline';
-              }
-            } catch (error) {
-              console.error('[Cache] Status check failed:', error);
-            }
-          };
-
-          // Check cache status after registration
-          setTimeout(updateCacheStatus, 2000);
-
-          // Update cache status every minute
-          setInterval(updateCacheStatus, 60000);
-
-          // Check for updates every 5 minutes
-          setInterval(() => {
-            registration.update();
-          }, 300000);
-
-          // Listen for updates
-          registration.addEventListener('updatefound', () => {
-            const newWorker = registration.installing;
-            console.log('[Service Worker] New version found, installing...');
-
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // New service worker available, prompt user
-                const updateNotice = confirm(
-                  '新しいバージョンが利用可能です。\n\nリロードして最新版を適用しますか？'
-                );
-                if (updateNotice) {
-                  newWorker.postMessage({ type: 'SKIP_WAITING' });
-                  window.location.reload();
-                }
-              }
-            });
-          });
-
-          // Handle controller change
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            console.log('[Service Worker] Controller changed, reloading...');
-            window.location.reload();
-          });
-
-        } catch (error) {
-          console.error('[Service Worker] Registration failed:', error);
-        }
-      });
-    } else {
-      console.warn('[Service Worker] Not supported in this browser');
-    }
 
     // Network status monitoring
     window.addEventListener('online', () => {
