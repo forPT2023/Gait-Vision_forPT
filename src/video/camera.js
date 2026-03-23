@@ -1,15 +1,40 @@
 export function buildCameraConstraints({ windowWidth, windowHeight }) {
+  const portrait = windowHeight > windowWidth;
+  const aspectRatio = portrait ? 9 / 16 : 16 / 9;
+
   return [
     {
       video: {
-        facingMode: 'user',
-        aspectRatio: { ideal: windowHeight > windowWidth ? 9 / 16 : 16 / 9 },
+        facingMode: { ideal: 'environment' },
+        width: portrait ? { ideal: 1080 } : { ideal: 1920 },
+        height: portrait ? { ideal: 1920 } : { ideal: 1080 },
+        aspectRatio: { ideal: aspectRatio },
         frameRate: { ideal: 30, max: 30 }
       }
     },
-    { video: { facingMode: 'user' } },
+    {
+      video: {
+        facingMode: { ideal: 'user' },
+        aspectRatio: { ideal: aspectRatio },
+        frameRate: { ideal: 30, max: 30 }
+      }
+    },
     { video: true }
   ];
+}
+
+export function shouldRestartCameraForOrientationChange({
+  hasMediaStream,
+  isRecording,
+  isAnalyzing,
+  sourceMode
+}) {
+  return Boolean(
+    hasMediaStream &&
+    sourceMode === 'camera' &&
+    !isRecording &&
+    !isAnalyzing
+  );
 }
 
 export function waitForVideoMetadataAndPlay({ videoElement, timeoutMs = 5000 }) {
