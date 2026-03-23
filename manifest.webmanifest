@@ -1,11 +1,23 @@
 {
+  "id": "./",
   "name": "Gait VISION forPT",
   "short_name": "GaitVISION",
+  "description": "MediaPipe Pose Landmarker を用いた歩行分析PWA。カメラまたは動画から歩行パラメータを可視化し、レポート出力できます。",
+  "lang": "ja",
   "start_url": "./",
   "scope": "./",
-  "display": "fullscreen",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "any",
-  "theme_color": "#2d44b8",
+  "theme_color": "#2563eb",
   "background_color": "#0a0e1a",
-  "icons": []
+  "categories": ["medical", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }

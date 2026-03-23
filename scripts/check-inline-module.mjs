@@ -14,8 +14,10 @@ if (!html.includes('href="./manifest.webmanifest"')) {
   process.exit(1);
 }
 
-if (!html.includes("register('./sw.js'")) {
-  console.error('index.html must register the service worker with a relative path');
+const serviceWorkerModule = readFileSync(new URL('../src/pwa/serviceWorker.js', import.meta.url), 'utf8');
+
+if (!(html.includes("register('./sw.js'") || serviceWorkerModule.includes("register('./sw.js'"))) {
+  console.error('service worker registration must keep the relative path ./sw.js');
   process.exit(1);
 }
 
