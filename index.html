@@ -77,7 +77,7 @@
     .plane-sagittal .sagittal-chart { display: block; }
     @media (orientation: portrait) {
       #main-layout { flex-direction: column; }
-      #canvas-container { flex: 0 0 min(72dvh, 58%); width: 100%; min-height: min(72dvh, 520px); }
+      #canvas-container { flex: 0 0 min(82dvh, 72%); width: 100%; min-height: min(82dvh, 620px); }
       #charts-container { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; overflow-y: auto; }
       .chart-wrapper { margin-bottom: 0; }
       .chart-wrapper canvas { height: 200px !important; }
@@ -100,7 +100,7 @@
     }
     @media (max-width: 640px) and (orientation: portrait) {
       header h1 { font-size: 1.05rem !important; }
-      #canvas-container { flex-basis: min(76dvh, 62%); min-height: min(76dvh, 560px); }
+      #canvas-container { flex-basis: min(84dvh, 76%); min-height: min(84dvh, 660px); }
       .video-frame-guide { inset: 0.5rem; }
       .video-frame-badge { top: 0.5rem; left: 0.5rem; font-size: 0.7rem; }
     }
@@ -716,7 +716,9 @@
         sourceWidth: videoElement.videoWidth,
         sourceHeight: videoElement.videoHeight,
         isPortraitViewport,
-        preferViewportOrientation: !!mediaStream && !videoFileUrl
+        // Keep native camera frame aspect to avoid stretched preview on phones.
+        // Orientation correction should be handled by camera restart / CSS layout, not by swapping dimensions.
+        preferViewportOrientation: false
       });
       const layout = calculateCanvasLayout({
         containerWidth: container.clientWidth,
