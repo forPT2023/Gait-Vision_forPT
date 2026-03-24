@@ -1,26 +1,93 @@
-export function buildCameraConstraints({ windowWidth, windowHeight }) {
+export function buildCameraConstraints({
+  windowWidth,
+  windowHeight,
+  preferredFacingMode = 'environment',
+  preferredDeviceId = ''
+}) {
   const portrait = windowHeight > windowWidth;
   const aspectRatio = portrait ? 9 / 16 : 16 / 9;
+  const oppositeFacingMode = preferredFacingMode === 'user' ? 'environment' : 'user';
+
+  const buildBaseVideo = (facingMode) => ({
+    facingMode: { ideal: facingMode },
+    aspectRatio: { ideal: aspectRatio },
+    frameRate: { ideal: 30, max: 30 }
+  });
+
+  if (preferredDeviceId) {
+    return [
+      {
+        video: {
+          ...buildBaseVideo(preferredFacingMode),
+          deviceId: { exact: preferredDeviceId },
+          width: portrait ? { ideal: 1080 } : { ideal: 1920 },
+          height: portrait ? { ideal: 1920 } : { ideal: 1080 }
+        }
+      },
+      {
+        video: {
+          ...buildBaseVideo(preferredFacingMode),
+          width: portrait ? { ideal: 1080 } : { ideal: 1920 },
+          height: portrait ? { ideal: 1920 } : { ideal: 1080 }
+        }
+      },
+      {
+        video: buildBaseVideo(oppositeFacingMode)
+      },
+      { video: true }
+    ];
+  }
 
   return [
     {
       video: {
-        facingMode: { ideal: 'environment' },
+        ...buildBaseVideo(preferredFacingMode),
         width: portrait ? { ideal: 1080 } : { ideal: 1920 },
-        height: portrait ? { ideal: 1920 } : { ideal: 1080 },
-        aspectRatio: { ideal: aspectRatio },
-        frameRate: { ideal: 30, max: 30 }
+        height: portrait ? { ideal: 1920 } : { ideal: 1080 }
       }
     },
     {
-      video: {
-        facingMode: { ideal: 'user' },
-        aspectRatio: { ideal: aspectRatio },
-        frameRate: { ideal: 30, max: 30 }
-      }
+      video: buildBaseVideo(oppositeFacingMode)
     },
     { video: true }
   ];
+}
+
+export async function listAvailableVideoInputs({
+  mediaDevices,
+  logger = console
+}) {
+  if (!mediaDevices?.enumerateDevices) {
+    return [];
+  }
+
+  try {
+    const devices = await mediaDevices.enumerateDevices();
+    return devices
+      .filter((device) => device.kind === 'videoinput')
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `カメラ ${index + 1}`,
+        facingMode: inferFacingModeFromLabel(device.label)
+      }));
+  } catch (error) {
+    logger.warn?.('[Camera] Failed to enumerate devices:', error);
+    return [];
+  }
+}
+
+export function inferFacingModeFromLabel(label = '') {
+  const normalized = String(label).toLowerCase();
+
+  if (/front|facetime|true depth|user|前|イン/.test(normalized)) {
+    return 'user';
+  }
+
+  if (/back|rear|environment|外|背面|広角|ultra wide|telephoto/.test(normalized)) {
+    return 'environment';
+  }
+
+  return 'unknown';
 }
 
 export function shouldRestartCameraForOrientationChange({
