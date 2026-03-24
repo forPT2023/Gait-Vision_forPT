@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { calculateCanvasLayout, getDefaultVideoAspectRatio, syncCanvasDisplaySize } from '../src/video/display.js';
+import { calculateCanvasLayout, getDefaultVideoAspectRatio, resolveDisplaySourceDimensions, syncCanvasDisplaySize } from '../src/video/display.js';
 
 test('getDefaultVideoAspectRatio uses portrait-friendly fallback on tall viewports', () => {
   assert.equal(getDefaultVideoAspectRatio({ isPortraitViewport: true }), 9 / 16);
@@ -22,6 +22,18 @@ test('calculateCanvasLayout fits portrait video inside portrait container withou
   assert.equal(layout.pixelWidth, 630);
   assert.equal(layout.pixelHeight, 1120);
   assert.equal(layout.scale, 2);
+});
+
+test('resolveDisplaySourceDimensions swaps live camera dimensions when viewport orientation disagrees', () => {
+  assert.deepEqual(
+    resolveDisplaySourceDimensions({
+      sourceWidth: 1920,
+      sourceHeight: 1080,
+      isPortraitViewport: true,
+      preferViewportOrientation: true
+    }),
+    { width: 1080, height: 1920, wasSwapped: true }
+  );
 });
 
 test('syncCanvasDisplaySize keeps css and backing-store sizes in sync', () => {

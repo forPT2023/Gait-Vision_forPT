@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildCameraConstraints, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from '../src/video/camera.js';
+import { buildCameraConstraints, inferFacingModeFromLabel, listAvailableVideoInputs, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from '../src/video/camera.js';
 
 test('buildCameraConstraints prefers portrait ratio on tall viewports', () => {
   const constraints = buildCameraConstraints({ windowWidth: 600, windowHeight: 900 });
@@ -9,6 +9,44 @@ test('buildCameraConstraints prefers portrait ratio on tall viewports', () => {
   assert.deepEqual(constraints[0].video.facingMode, { ideal: 'environment' });
   assert.equal(constraints[0].video.height.ideal, 1920);
   assert.deepEqual(constraints[2], { video: true });
+});
+
+test('buildCameraConstraints prioritizes requested camera device and facing mode', () => {
+  const constraints = buildCameraConstraints({
+    windowWidth: 1024,
+    windowHeight: 768,
+    preferredFacingMode: 'user',
+    preferredDeviceId: 'camera-front'
+  });
+
+  assert.deepEqual(constraints[0].video.deviceId, { exact: 'camera-front' });
+  assert.deepEqual(constraints[0].video.facingMode, { ideal: 'user' });
+  assert.deepEqual(constraints[2].video.facingMode, { ideal: 'environment' });
+});
+
+test('inferFacingModeFromLabel derives front and back camera hints from labels', () => {
+  assert.equal(inferFacingModeFromLabel('Front Camera'), 'user');
+  assert.equal(inferFacingModeFromLabel('Back Ultra Wide Camera'), 'environment');
+  assert.equal(inferFacingModeFromLabel('USB Camera'), 'unknown');
+});
+
+test('listAvailableVideoInputs returns normalized camera options', async () => {
+  const cameras = await listAvailableVideoInputs({
+    mediaDevices: {
+      async enumerateDevices() {
+        return [
+          { kind: 'audioinput', deviceId: 'mic-1', label: 'Mic' },
+          { kind: 'videoinput', deviceId: 'cam-1', label: 'Front Camera' },
+          { kind: 'videoinput', deviceId: 'cam-2', label: '' }
+        ];
+      }
+    }
+  });
+
+  assert.deepEqual(cameras, [
+    { deviceId: 'cam-1', label: 'Front Camera', facingMode: 'user' },
+    { deviceId: 'cam-2', label: 'カメラ 2', facingMode: 'unknown' }
+  ]);
 });
 
 test('stopMediaStream stops every track when a stream is present', () => {

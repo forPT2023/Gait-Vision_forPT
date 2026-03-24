@@ -25,8 +25,8 @@
 
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100dvh; overflow: hidden; background-color: #0a0e1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #e2e8f0; overscroll-behavior: none; }
-    #main-app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+    html, body { width: 100%; height: var(--app-height, 100dvh); overflow: hidden; background-color: #0a0e1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #e2e8f0; overscroll-behavior: none; }
+    #main-app { display: flex; flex-direction: column; height: var(--app-height, 100dvh); overflow: hidden; }
     #main-app.hidden { display: none; }
     header { flex-shrink: 0; background: linear-gradient(135deg, #1a1f2e 0%, #252d3d 100%); padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 1rem 0.75rem 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.5); border-bottom: 1px solid #2d3748; }
     #main-layout { flex: 1; overflow: hidden; display: flex; position: relative; gap: 0.75rem; padding: 0.75rem; }
@@ -44,15 +44,33 @@
     .btn-secondary:hover:not(:disabled) { background: #475569; border-color: #64748b; color: white; }
     .btn-success { background: #10b981; color: white; border: 1px solid #34d399; }
     .btn-success:hover:not(:disabled) { background: #059669; border-color: #10b981; }
+    .device-mode-badge { display: inline-flex; align-items: center; padding: 0.35rem 0.65rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; border: 1px solid #334155; background: rgba(15, 23, 42, 0.9); color: #cbd5e1; }
+    .device-mode-badge[data-mode="phone"] { color: #bfdbfe; border-color: #2563eb; }
+    .device-mode-badge[data-mode="tablet"] { color: #bbf7d0; border-color: #10b981; }
     #canvas-container { position: relative; background: radial-gradient(circle at top, #111827 0%, #000 100%); display: flex; align-items: center; justify-content: center; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12); min-height: 280px; }
     #video-element { display: none; }
     #canvas-element { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 100%; max-height: 100%; border-radius: 0.75rem; }
     .video-frame-guide { position: absolute; inset: 0.75rem; border: 1px dashed rgba(148, 163, 184, 0.32); border-radius: 0.9rem; pointer-events: none; }
     .video-frame-badge { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 1; padding: 0.4rem 0.65rem; border-radius: 999px; background: rgba(15, 23, 42, 0.78); color: #cbd5e1; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(6px); border: 1px solid rgba(148, 163, 184, 0.22); }
+    #phone-flow-banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0.75rem; padding: 0.75rem 1rem; border-radius: 0.85rem; background: rgba(15, 23, 42, 0.92); border: 1px solid #334155; color: #cbd5e1; }
+    #phone-flow-banner[data-view="results"] { border-color: #10b981; }
+    #phone-flow-banner[data-view="analyzing"] { border-color: #f59e0b; }
+    #phone-flow-message { font-size: 0.85rem; line-height: 1.45; }
+    #phone-flow-meta { font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem; }
+    #phone-flow-stage { display: inline-flex; align-items: center; justify-content: center; padding: 0.35rem 0.55rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700; border: 1px solid rgba(148, 163, 184, 0.35); background: rgba(2, 6, 23, 0.8); color: #cbd5e1; white-space: nowrap; }
+    #phone-flow-quick-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.45rem; }
+    #phone-flow-quick-actions button { border: 1px solid #475569; background: #1e293b; color: #e2e8f0; border-radius: 0.45rem; padding: 0.3rem 0.55rem; font-size: 0.72rem; font-weight: 600; cursor: pointer; }
+    #phone-flow-quick-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+    body[data-device-mode="phone"][data-phone-flow-view="capture"] .phone-results-only,
+    body[data-device-mode="phone"][data-phone-flow-view="analyzing"] .phone-results-only,
+    body[data-device-mode="phone"][data-phone-flow-view="results"] .phone-capture-only { display: none !important; }
+    body[data-device-mode="phone"][data-phone-flow-view="analyzing"] .phone-setup-only,
+    body[data-device-mode="phone"][data-phone-flow-view="results"] .phone-setup-only { display: none !important; }
     #charts-container { background: #0f1419; overflow: auto; padding: 1rem; border: 1px solid #1e293b; border-radius: 1rem; }
     .chart-wrapper { background: #1a1f2e; border-radius: 0.75rem; padding: 1rem; margin-bottom: 1rem; border: 1px solid #2d3748; }
     .chart-wrapper:last-child { margin-bottom: 0; }
     .chart-wrapper canvas { width: 100% !important; height: 300px !important; }
+    #charts-container.hidden-panel { display: none !important; }
     .frontal-chart { display: block; }
     .sagittal-chart { display: none; }
     .plane-sagittal .frontal-chart { display: none; }
@@ -127,7 +145,7 @@
       .report-charts-row { grid-template-columns: 1fr; }
     }
     #print-report { display: none; }
-    #consent-screen, #patient-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100dvh; background: #0a0e1a; display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+    #consent-screen, #patient-screen { position: fixed; top: 0; left: 0; width: 100%; height: var(--app-height, 100dvh); background: #0a0e1a; display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
     #consent-screen.hidden, #patient-screen.hidden { display: none; }
     .screen-card { background: #151923; border-radius: 1rem; padding: 2rem; max-width: 500px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.8); border: 1px solid #2d3748; }
     .screen-card h2 { color: #60a5fa; font-size: 1.5rem; margin-bottom: 1rem; }
@@ -139,7 +157,7 @@
     .screen-card button { width: 100%; padding: 0.875rem; border-radius: 0.5rem; border: 1px solid #3b82f6; background: #2563eb; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.2s; }
     .screen-card button:hover:not(:disabled) { background: #1d4ed8; border-color: #2563eb; }
     .screen-card button:disabled { opacity: 0.5; cursor: not-allowed; }
-    #orientation-warning { position: fixed; top: 0; left: 0; width: 100%; height: 100dvh; background: rgba(0,0,0,0.95); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 2rem; }
+    #orientation-warning { position: fixed; top: 0; left: 0; width: 100%; height: var(--app-height, 100dvh); background: rgba(0,0,0,0.95); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 2rem; }
     #orientation-warning.show { display: flex; }
     #orientation-warning .warning-content { text-align: center; color: white; }
     #orientation-warning .warning-icon { font-size: 4rem; margin-bottom: 1rem; }
@@ -148,7 +166,7 @@
     .notification.error { background: #ef4444; }
     .notification.success { background: #10b981; }
     @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-    #report-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100dvh; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
+    #report-modal { position: fixed; top: 0; left: 0; width: 100%; height: var(--app-height, 100dvh); background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
     #report-modal.show { display: flex; }
     #report-modal-content { background: white; border-radius: 1rem; padding: 2rem; max-width: 800px; width: 100%; max-height: 90vh; overflow-y: auto; position: relative; }
     #report-modal-content h1 { color: #0f172a; font-size: 1.75rem; margin-bottom: 1.5rem; text-align: center; }
@@ -161,7 +179,7 @@
     #report-modal-content .btn-print:hover { background: #2563eb; }
     #report-modal-content .btn-close { background: #64748b; color: white; }
     #report-modal-content .btn-close:hover { background: #475569; }
-    #save-recording-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100dvh; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
+    #save-recording-modal { position: fixed; top: 0; left: 0; width: 100%; height: var(--app-height, 100dvh); background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
     #save-recording-modal.show { display: flex; }
     #save-recording-modal-content { background: #151923; border-radius: 1rem; padding: 2rem; max-width: 500px; width: 100%; color: #e2e8f0; text-align: center; border: 1px solid #2d3748; }
     #save-recording-modal-content h2 { color: #60a5fa; font-size: 1.5rem; margin-bottom: 1rem; }
@@ -225,6 +243,7 @@
           </div>
         </div>
         <div style="display: flex; gap: 1rem; align-items: center;">
+          <span id="device-mode-badge" class="device-mode-badge" data-mode="desktop">デスクトップ版</span>
           <span id="cache-status" style="color: #64748b; font-size: 0.75rem; display: none;" title="Service Workerのキャッシュ状態"></span>
           <span id="patient-display" style="color: #cbd5e1; font-size: 0.875rem; cursor: pointer; text-decoration: underline;" title="クリックして変更"></span>
           <span id="recording-info" style="color: #ef4444; font-weight: 600; font-size: 0.875rem; display: none;"></span>
@@ -232,6 +251,19 @@
         </div>
       </div>
     </header>
+
+    <div id="phone-flow-banner" class="hidden-panel" data-view="capture">
+      <div>
+        <div id="phone-flow-message">スマホ版: 撮影ステップです。</div>
+        <div id="phone-flow-meta">前回結果: まだありません</div>
+        <div id="phone-flow-quick-actions" class="phone-results-only">
+          <button id="btn-phone-analyzed-video" disabled>💾 解析動画</button>
+          <button id="btn-phone-report" disabled>📄 レポート</button>
+          <button id="btn-phone-csv" disabled>📊 CSV</button>
+        </div>
+      </div>
+      <span id="phone-flow-stage">Step 1/3 撮影</span>
+    </div>
 
     <div id="main-layout">
       <div id="canvas-container">
@@ -254,35 +286,46 @@
     </div>
 
     <div id="control-bar">
-      <div class="tooltip">
+      <div class="tooltip phone-capture-only phone-setup-only">
         <button id="btn-camera" class="btn-primary">📷 カメラ</button>
         <span class="tooltiptext">カメラでリアルタイム分析</span>
       </div>
-      <div class="tooltip">
+      <div class="tooltip phone-capture-only phone-setup-only">
+        <select id="camera-select" aria-label="使用するカメラ">
+          <option value="environment">背面カメラ優先</option>
+          <option value="user">前面カメラ優先</option>
+        </select>
+        <span class="tooltiptext">使用するカメラを選択</span>
+      </div>
+      <div class="tooltip phone-capture-only phone-setup-only">
         <button id="btn-video" class="btn-secondary">📁 動画</button>
         <span class="tooltiptext">動画ファイルを読み込んで分析</span>
       </div>
-      <div class="tooltip">
+      <div class="tooltip phone-capture-only">
         <button id="btn-record" class="btn-danger" disabled>⏺ 録画</button>
         <span class="tooltiptext">分析・録画を開始（カメラ起動後に使用可能）</span>
       </div>
-      <div class="tooltip">
+      <div class="tooltip phone-results-only">
         <button id="btn-save-analyzed-video" class="btn-success" disabled>💾 解析動画</button>
         <span class="tooltiptext">解析済み動画を保存（動画解析後に使用可能）</span>
       </div>
       <div class="tooltip">
+        <button id="btn-toggle-charts" class="btn-secondary" style="display:none;">📈 グラフを表示</button>
+        <span class="tooltiptext">スマホ版でグラフ表示を切り替え</span>
+      </div>
+      <div class="tooltip phone-results-only">
         <button id="btn-csv" class="btn-secondary" disabled>📊 CSV</button>
         <span class="tooltiptext">分析データをCSV形式でエクスポート</span>
       </div>
-      <div class="tooltip">
+      <div class="tooltip phone-results-only">
         <button id="btn-report" class="btn-secondary" disabled>📄 レポート</button>
         <span class="tooltiptext">分析結果のサマリーレポート表示</span>
       </div>
-      <div class="tooltip">
+      <div class="tooltip phone-results-only">
         <button id="btn-reset-charts" class="btn-secondary">🔄 波形リセット</button>
         <span class="tooltiptext">グラフの波形をクリア</span>
       </div>
-      <div class="tooltip">
+      <div class="tooltip phone-results-only">
         <button id="btn-export" class="btn-secondary">📦 エクスポート</button>
         <span class="tooltiptext">全データをJSON形式でバックアップ</span>
       </div>
@@ -366,17 +409,20 @@
     import { APP_VERSION_LABEL } from './src/config/app.js';
     import { createChartController } from './src/ui/charts.js';
     import { applyPatientValidationUI, applyPlaneModeUI, disableRecordButton, enableAnalysisExportButtons, formatPatientDisplay, setRecordButtonForActiveAnalysis, setRecordButtonForActiveRecording, setRecordButtonForCameraMode, setRecordButtonForVideoMode } from './src/ui/controls.js';
+    import { applyDeviceModeUi, detectDeviceMode } from './src/ui/deviceMode.js';
+    import { applyPhoneFlowUi, applyPhoneQuickActionState, getPhoneFlowState, getPhoneQuickActionDisabledState } from './src/ui/phoneFlow.js';
     import { showNotification as renderNotification } from './src/ui/notifications.js';
     import { updateOrientationWarning } from './src/ui/orientation.js';
     import { validatePatientId } from './src/ui/patient.js';
     import { closeReportModal, openReportModal, setReportHtml } from './src/ui/reportModal.js';
     import { restoreScreenState, showMainApp, showPatientScreen } from './src/ui/screens.js';
+    import { applyViewportHeightVar } from './src/ui/viewport.js';
     import { setupInstallPrompt } from './src/pwa/install.js';
     import { registerAppServiceWorker } from './src/pwa/serviceWorker.js';
     import { createSessionStorage } from './src/storage/db.js';
     import { buildAnalysisCsv, buildCsvExportFilename, buildPdfReportFilename, buildSessionExport, createBackupFilename, downloadBlobFile, downloadJson } from './src/storage/export.js';
-    import { buildCameraConstraints, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from './src/video/camera.js';
-    import { calculateCanvasLayout, getDefaultVideoAspectRatio, syncCanvasDisplaySize } from './src/video/display.js';
+    import { buildCameraConstraints, listAvailableVideoInputs, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from './src/video/camera.js';
+    import { calculateCanvasLayout, getDefaultVideoAspectRatio, resolveDisplaySourceDimensions, syncCanvasDisplaySize } from './src/video/display.js';
     import { buildAnalyzedVideoFilename, buildRecordingFilename, buildRecordingMetadata, closeSaveRecordingDialog, createCanvasRecordingSession, downloadBlob, formatRecordingInfoText, resetRecordedVideoState, showSaveRecordingDialog as showRecordingSaveDialog } from './src/video/recording.js';
     import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findClosestAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
     import { configureVideoElementForFile, createVideoFileInput, startVideoPlaybackForAnalysis, waitForVideoLoad } from './src/video/videoFile.js';
@@ -417,6 +463,9 @@
     let videoEpochBaseMs = null; // For Chart.js realtime x-axis in video mode
     let videoFrameCallbackHandle = null; // requestVideoFrameCallback handle (video mode)
     let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    let deviceMode = 'desktop';
+    let chartsVisibleOnPhone = false;
+    let phoneFlowView = 'capture';
     let recordingInterval = null; // Timer for recording info display
     let orientationRestartTimeoutId = null;
 
@@ -426,6 +475,12 @@
     const canvasCtx = canvasElement.getContext('2d');
     const fpsDisplay = document.getElementById('fps-display');
     const installButton = document.getElementById('btn-install-app');
+    const cameraSelect = document.getElementById('camera-select');
+    const toggleChartsButton = document.getElementById('btn-toggle-charts');
+    const cameraPreference = {
+      facingMode: 'environment',
+      deviceId: ''
+    };
     const chartController = createChartController({
       ChartCtor: window.Chart,
       document,
@@ -581,6 +636,66 @@
       });
     }
 
+    function resetAnalysisOutputButtons() {
+      document.getElementById('btn-csv').disabled = true;
+      document.getElementById('btn-report').disabled = true;
+      document.getElementById('btn-save-analyzed-video').disabled = true;
+      syncPhoneQuickActions();
+    }
+
+    function prepareForNewCaptureSession({ resetCharts = false } = {}) {
+      phoneFlowView = 'capture';
+      resetAnalysisOutputButtons();
+      if (resetCharts) {
+        chartController.resetCharts();
+      }
+      closeReportModal({ documentRef: document });
+      syncDeviceModeUi();
+    }
+
+    function syncPhoneQuickActions() {
+      const state = getPhoneQuickActionDisabledState({
+        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled,
+        reportDisabled: document.getElementById('btn-report').disabled,
+        csvDisabled: document.getElementById('btn-csv').disabled
+      });
+
+      applyPhoneQuickActionState({
+        documentRef: document,
+        state
+      });
+    }
+
+    function syncDeviceModeUi() {
+      deviceMode = detectDeviceMode({
+        windowWidth: window.innerWidth,
+        userAgent: navigator.userAgent,
+        maxTouchPoints: navigator.maxTouchPoints || 0,
+        platform: navigator.platform || '',
+        isStandalone: window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+      });
+      isMobile = deviceMode !== 'desktop';
+      const phoneFlowState = getPhoneFlowState({
+        deviceMode,
+        currentView: phoneFlowView,
+        hasAnalysisData: analysisData.length > 0,
+        isAnalyzing,
+        analysisPoints: analysisData.length,
+        stepCount
+      });
+      chartsVisibleOnPhone = phoneFlowState.chartsVisible;
+      applyPhoneFlowUi({
+        documentRef: document,
+        state: phoneFlowState
+      });
+      syncPhoneQuickActions();
+      return applyDeviceModeUi({
+        documentRef: document,
+        deviceMode,
+        chartsVisibleOnPhone
+      });
+    }
+
     function updateFPS() {
       fpsCounter++;
       const now = performance.now();
@@ -596,14 +711,21 @@
 
     function resizeCanvas() {
       const container = document.getElementById('canvas-container');
+      const isPortraitViewport = window.innerHeight > window.innerWidth;
+      const displaySource = resolveDisplaySourceDimensions({
+        sourceWidth: videoElement.videoWidth,
+        sourceHeight: videoElement.videoHeight,
+        isPortraitViewport,
+        preferViewportOrientation: !!mediaStream && !videoFileUrl
+      });
       const layout = calculateCanvasLayout({
         containerWidth: container.clientWidth,
         containerHeight: container.clientHeight,
-        sourceWidth: videoElement.videoWidth,
-        sourceHeight: videoElement.videoHeight,
+        sourceWidth: displaySource.width,
+        sourceHeight: displaySource.height,
         devicePixelRatio: window.devicePixelRatio || 1,
         fallbackAspectRatio: getDefaultVideoAspectRatio({
-          isPortraitViewport: window.innerHeight > window.innerWidth
+          isPortraitViewport
         })
       });
 
@@ -617,7 +739,47 @@
 
       console.log('[Canvas] Resized to', `${layout.cssWidth}x${layout.cssHeight}`, 'css px /',
                   `${layout.pixelWidth}x${layout.pixelHeight}`, 'backing px',
-                  '(video:', videoElement.videoWidth, 'x', videoElement.videoHeight, ')');
+                  '(video:', videoElement.videoWidth, 'x', videoElement.videoHeight, '| display:', displaySource.width, 'x', displaySource.height, '| swapped:', displaySource.wasSwapped, ')');
+    }
+
+    async function refreshCameraOptions({ preserveSelection = true } = {}) {
+      const previousValue = preserveSelection ? cameraSelect.value : '';
+      const options = await listAvailableVideoInputs({
+        mediaDevices: navigator.mediaDevices,
+        logger: console
+      });
+
+      cameraSelect.innerHTML = '';
+
+      [
+        { value: 'environment', label: '背面カメラ優先' },
+        { value: 'user', label: '前面カメラ優先' }
+      ].forEach(({ value, label }) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        cameraSelect.appendChild(option);
+      });
+
+      if (options.length > 0) {
+        const divider = document.createElement('option');
+        divider.value = '';
+        divider.textContent = '────────';
+        divider.disabled = true;
+        cameraSelect.appendChild(divider);
+
+        options.forEach((camera, index) => {
+          const option = document.createElement('option');
+          option.value = `device:${camera.deviceId}`;
+          option.textContent = camera.label || `カメラ ${index + 1}`;
+          cameraSelect.appendChild(option);
+        });
+      }
+
+      const selectedValue = Array.from(cameraSelect.options).some((option) => option.value === previousValue)
+        ? previousValue
+        : (cameraPreference.deviceId ? `device:${cameraPreference.deviceId}` : cameraPreference.facingMode);
+      cameraSelect.value = selectedValue || 'environment';
     }
 
     // Gait analysis helpers moved to src/analysis/*.js
@@ -817,6 +979,7 @@
     // Camera
     async function startCamera({ showSuccessNotification = true } = {}) {
       try {
+        prepareForNewCaptureSession({ resetCharts: true });
         if (isAnalyzing) {
           stopAllProcessing();
         }
@@ -836,7 +999,9 @@
 
         const constraints = buildCameraConstraints({
           windowWidth: window.innerWidth,
-          windowHeight: window.innerHeight
+          windowHeight: window.innerHeight,
+          preferredFacingMode: cameraPreference.facingMode,
+          preferredDeviceId: cameraPreference.deviceId
         });
         mediaStream = await startCameraStreamWithFallbacks({
           mediaDevices: navigator.mediaDevices,
@@ -846,6 +1011,7 @@
           logger: console,
           timeoutMs: 5000
         });
+        await refreshCameraOptions();
         resizeCanvas();
         startCameraPreview();
         chartController.startCharts(); // Start chart streaming
@@ -933,6 +1099,7 @@
 
     async function loadVideoFile() {
       console.log('[Video] loadVideoFile() called');
+      prepareForNewCaptureSession({ resetCharts: true });
 
       // Prevent concurrent loads
       if (isLoadingVideo) {
@@ -1093,6 +1260,8 @@
         if (!sessionId) {
           throw createAppError('SESSION_SAVE_FAILED', 'セッション保存に失敗しました。');
         }
+        phoneFlowView = 'results';
+        syncDeviceModeUi();
         showNotification('セッションデータを保存しました', 'success');
       } catch (error) {
         console.error('Finalize session error:', error);
@@ -1103,6 +1272,7 @@
     // Analysis
     async function startAnalysis() {
       console.log('[Analysis] Starting...');
+      resetAnalysisOutputButtons();
 
       if (!poseLandmarker) {
         showNotification('MediaPipeが初期化されていません', 'error');
@@ -1139,6 +1309,7 @@
       // Reset analysis state
       isAnalyzing = true;
       analysisPlane = currentPlane;
+      syncDeviceModeUi();
       ({
         analysisStartEpochMs,
         analysisStartMpTimestamp,
@@ -1311,6 +1482,10 @@
 
     function stopAllProcessing() {
       isAnalyzing = false;
+      if (analysisData.length > 0) {
+        phoneFlowView = 'results';
+      }
+      syncDeviceModeUi();
 
       ({
         animationFrameId,
@@ -2044,6 +2219,9 @@
 
     document.getElementById('btn-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-report').addEventListener('click', generateReport);
+    document.getElementById('btn-phone-analyzed-video').addEventListener('click', saveAnalyzedVideo);
+    document.getElementById('btn-phone-csv').addEventListener('click', exportCSV);
+    document.getElementById('btn-phone-report').addEventListener('click', generateReport);
     document.getElementById('btn-reset-charts').addEventListener('click', () => chartController.resetCharts());
     document.getElementById('btn-export').addEventListener('click', exportAllData);
     document.getElementById('btn-settings').addEventListener('click', async () => {
@@ -2099,6 +2277,37 @@
       logger: console
     });
 
+    applyViewportHeightVar({ documentRef: document, windowRef: window });
+    syncDeviceModeUi();
+    refreshCameraOptions().catch((error) => {
+      console.warn('[Camera] Initial camera option refresh failed:', error);
+    });
+
+    cameraSelect.addEventListener('change', async () => {
+      const value = cameraSelect.value;
+      if (value.startsWith('device:')) {
+        cameraPreference.deviceId = value.slice('device:'.length);
+      } else {
+        cameraPreference.deviceId = '';
+        cameraPreference.facingMode = value || 'environment';
+      }
+
+      if (!mediaStream || getAnalysisSourceMode() !== 'camera' || isRecording || isAnalyzing) {
+        return;
+      }
+
+      await startCamera({ showSuccessNotification: false });
+      showNotification('選択したカメラに切り替えました', 'success');
+    });
+
+    toggleChartsButton.addEventListener('click', () => {
+      if (deviceMode !== 'phone') {
+        return;
+      }
+      phoneFlowView = phoneFlowView === 'results' ? 'capture' : 'results';
+      syncDeviceModeUi();
+    });
+
     registerAppServiceWorker({
       windowRef: window,
       navigatorRef: navigator,
@@ -2108,6 +2317,8 @@
     });
 
     const handleViewportChange = () => {
+      applyViewportHeightVar({ documentRef: document, windowRef: window });
+      syncDeviceModeUi();
       resizeCanvas();
       syncOrientationWarning();
       scheduleCameraOrientationRefresh();
@@ -2115,6 +2326,8 @@
 
     window.addEventListener('resize', handleViewportChange);
     window.addEventListener('orientationchange', handleViewportChange);
+    window.visualViewport?.addEventListener('resize', handleViewportChange);
+    window.visualViewport?.addEventListener('scroll', handleViewportChange);
 
     // Memory cleanup every 5 minutes (idle only, never interrupt an active session)
     setInterval(async () => {

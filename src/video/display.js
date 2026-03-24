@@ -4,6 +4,41 @@ export function getDefaultVideoAspectRatio({
   return isPortraitViewport ? 9 / 16 : 16 / 9;
 }
 
+export function resolveDisplaySourceDimensions({
+  sourceWidth,
+  sourceHeight,
+  isPortraitViewport = false,
+  preferViewportOrientation = false
+} = {}) {
+  const safeWidth = Number(sourceWidth) || 0;
+  const safeHeight = Number(sourceHeight) || 0;
+
+  if (!(safeWidth > 0 && safeHeight > 0)) {
+    return {
+      width: safeWidth,
+      height: safeHeight,
+      wasSwapped: false
+    };
+  }
+
+  const sourceIsPortrait = safeHeight > safeWidth;
+  const shouldSwap = preferViewportOrientation && sourceIsPortrait !== isPortraitViewport;
+
+  if (!shouldSwap) {
+    return {
+      width: safeWidth,
+      height: safeHeight,
+      wasSwapped: false
+    };
+  }
+
+  return {
+    width: safeHeight,
+    height: safeWidth,
+    wasSwapped: true
+  };
+}
+
 export function calculateCanvasLayout({
   containerWidth,
   containerHeight,
@@ -59,4 +94,3 @@ export function syncCanvasDisplaySize({
   canvasElement.style.width = `${cssWidth}px`;
   canvasElement.style.height = `${cssHeight}px`;
 }
-
