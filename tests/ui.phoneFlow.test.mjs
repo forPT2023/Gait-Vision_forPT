@@ -41,7 +41,7 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     chartsVisible: false,
     toggleEnabled: false,
     toggleLabel: '📈 結果待ち',
-    message: 'スマホ版: 取得ステップです。標準カメラ撮影または動画アップロード後に解析してください。'
+    message: 'スマホ版: 取得ステップです。動画を撮影またはアップロードしてから解析してください。'
   });
 
   assert.deepEqual(getPhoneFlowState({
