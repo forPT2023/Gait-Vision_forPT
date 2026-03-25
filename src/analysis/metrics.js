@@ -73,6 +73,9 @@ export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT,
   if (!worldLandmarks || !previousWorldLandmarks || !deltaT || deltaT <= 0 || worldLandmarks.length < 33 || previousWorldLandmarks.length < 33) {
     return 0;
   }
+  if (deltaT < 8) {
+    return 0;
+  }
 
   const hipMid = {
     x: (worldLandmarks[LM.LEFT_HIP].x + worldLandmarks[LM.RIGHT_HIP].x) / 2,
@@ -85,9 +88,8 @@ export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT,
     z: (previousWorldLandmarks[LM.LEFT_HIP].z + previousWorldLandmarks[LM.RIGHT_HIP].z) / 2
   };
 
-  const displacement = Math.sqrt(
+  const displacementXZ = Math.sqrt(
     Math.pow(hipMid.x - prevHipMid.x, 2) +
-    Math.pow(hipMid.y - prevHipMid.y, 2) +
     Math.pow(hipMid.z - prevHipMid.z, 2)
   );
 
@@ -96,21 +98,27 @@ export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT,
     Math.pow(worldLandmarks[LM.LEFT_SHOULDER].y - worldLandmarks[LM.RIGHT_SHOULDER].y, 2) +
     Math.pow(worldLandmarks[LM.LEFT_SHOULDER].z - worldLandmarks[LM.RIGHT_SHOULDER].z, 2)
   );
+  const hipWidth = Math.sqrt(
+    Math.pow(worldLandmarks[LM.LEFT_HIP].x - worldLandmarks[LM.RIGHT_HIP].x, 2) +
+    Math.pow(worldLandmarks[LM.LEFT_HIP].y - worldLandmarks[LM.RIGHT_HIP].y, 2) +
+    Math.pow(worldLandmarks[LM.LEFT_HIP].z - worldLandmarks[LM.RIGHT_HIP].z, 2)
+  );
+  const bodyScale = shoulderWidth > 0.015 ? shoulderWidth : (hipWidth > 0.015 ? hipWidth : 0);
 
-  if (shoulderWidth < 0.05 || Number.isNaN(shoulderWidth)) {
+  if (bodyScale <= 0 || Number.isNaN(bodyScale)) {
     return 0;
   }
 
-  const scaledDisplacement = (displacement / shoulderWidth) * 0.4;
+  const scaledDisplacement = (displacementXZ / bodyScale) * 0.4;
   const speedMps = scaledDisplacement / (deltaT / 1000);
 
   if (Math.random() < 0.01) {
-    logger.log?.('[Speed] displacement:', displacement.toFixed(5), '| shoulderWidth:', shoulderWidth.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
+    logger.log?.('[Speed] displacementXZ:', displacementXZ.toFixed(5), '| bodyScale:', bodyScale.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
   }
 
   if (Number.isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
-    logger.warn?.('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacement:', displacement.toFixed(4), '| shoulderWidth:', shoulderWidth.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
-    return Math.max(0, Math.min(3, speedMps));
+    logger.warn?.('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacementXZ:', displacementXZ.toFixed(4), '| bodyScale:', bodyScale.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
+    return Math.max(0, Math.min(5, speedMps));
   }
 
   return speedMps;

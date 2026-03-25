@@ -90,7 +90,7 @@ export function clearLoadedVideoState({
   videoFileUrl,
   URLRef = URL,
   logger = console
-}) {
+} = {}) {
   const cancelledState = cancelScheduledMediaWork({
     videoElement,
     videoFrameCallbackHandle

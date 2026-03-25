@@ -82,6 +82,36 @@ test('calcWalkingSpeed scales displacement by shoulder width', () => {
   assert.ok(Math.abs(speed - 0.04) < 1e-6);
 });
 
+test('calcWalkingSpeed falls back to hip width when shoulders are too close', () => {
+  const prev = createLandmarks();
+  const curr = createLandmarks();
+
+  prev[LM.LEFT_HIP] = { x: 0, y: 0, z: 0 };
+  prev[LM.RIGHT_HIP] = { x: 0.2, y: 0, z: 0 };
+  curr[LM.LEFT_HIP] = { x: 0.1, y: 0, z: 0 };
+  curr[LM.RIGHT_HIP] = { x: 0.3, y: 0, z: 0 };
+
+  curr[LM.LEFT_SHOULDER] = { x: 0, y: 1, z: 0 };
+  curr[LM.RIGHT_SHOULDER] = { x: 0.005, y: 1, z: 0 };
+
+  const speed = calcWalkingSpeed(curr, prev, 1000, { log() {}, warn() {} });
+  assert.ok(speed > 0);
+});
+
+test('calcWalkingSpeed ignores overly-short frame intervals', () => {
+  const prev = createLandmarks();
+  const curr = createLandmarks();
+  prev[LM.LEFT_HIP] = { x: 0, y: 0, z: 0 };
+  prev[LM.RIGHT_HIP] = { x: 0.2, y: 0, z: 0 };
+  curr[LM.LEFT_HIP] = { x: 0.1, y: 0, z: 0 };
+  curr[LM.RIGHT_HIP] = { x: 0.3, y: 0, z: 0 };
+  curr[LM.LEFT_SHOULDER] = { x: 0, y: 1, z: 0 };
+  curr[LM.RIGHT_SHOULDER] = { x: 1, y: 1, z: 0 };
+
+  const speed = calcWalkingSpeed(curr, prev, 5, { log() {}, warn() {} });
+  assert.equal(speed, 0);
+});
+
 test('calcSymmetryIndex returns 100 for identical values and clamps low values', () => {
   assert.equal(calcSymmetryIndex(30, 30), 100);
   assert.equal(calcSymmetryIndex(0, 100), 0);
