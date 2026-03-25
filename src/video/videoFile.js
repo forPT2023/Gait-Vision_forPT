@@ -27,14 +27,21 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
 
     let pollInterval = null;
     let resolved = false;
+    const hasRenderableFrame = () => {
+      const hasDimensions = videoElement.videoWidth > 0 && videoElement.videoHeight > 0;
+      const hasDecodedFrame = videoElement.readyState >= 2;
+      const hasFiniteDuration = Number.isFinite(videoElement.duration) && videoElement.duration > 0;
+      return hasDimensions || (hasDecodedFrame && hasFiniteDuration);
+    };
+
     const done = (eventName) => {
       if (resolved) {
         logger.log('[Video] Event', eventName, 'fired but already resolved');
         return;
       }
 
-      logger.log('[Video] Event fired:', eventName, '| readyState:', videoElement.readyState, '| dimensions:', videoElement.videoWidth, 'x', videoElement.videoHeight);
-      if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+      logger.log('[Video] Event fired:', eventName, '| readyState:', videoElement.readyState, '| dimensions:', videoElement.videoWidth, 'x', videoElement.videoHeight, '| duration:', videoElement.duration);
+      if (hasRenderableFrame()) {
         resolved = true;
         clearTimeout(timeout);
         if (pollInterval) clearInterval(pollInterval);
@@ -86,13 +93,13 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
       logger.warn('[Video] load() call failed, continuing:', error);
     }
 
-    if (videoElement.readyState >= 1 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+    if (hasRenderableFrame()) {
       done('already-ready');
     }
 
     pollInterval = setInterval(() => {
       if (resolved) return;
-      if (videoElement.readyState >= 1 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+      if (hasRenderableFrame()) {
         done('polling-ready');
       }
     }, 150);
