@@ -14,6 +14,11 @@ export function configureVideoElementForFile(videoElement) {
 
 export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger = console }) {
   return new Promise((resolve, reject) => {
+    if (!videoElement || !src) {
+      reject(new Error('Invalid video source'));
+      return;
+    }
+
     const timeout = setTimeout(() => {
       logger.error('[Video] ❌ Load timeout after 30 seconds');
       reject(new Error('Timeout'));
@@ -39,10 +44,11 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     };
 
     const onError = (error) => {
-      logger.error('[Video] ❌ Load error:', error);
+      const mediaError = videoElement.error;
+      logger.error('[Video] ❌ Load error:', error, mediaError);
       clearTimeout(timeout);
       cleanup();
-      reject(new Error('Load failed'));
+      reject(new Error(mediaError?.message || 'Load failed'));
     };
 
     const cleanup = () => {
@@ -64,8 +70,17 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     videoElement.addEventListener('canplaythrough', doneCanplaythrough);
     videoElement.addEventListener('error', onError);
 
-    videoElement.src = src;
     videoElement.loop = false;
+    videoElement.src = src;
+    try {
+      videoElement.load?.();
+    } catch (error) {
+      logger.warn('[Video] load() call failed, continuing:', error);
+    }
+
+    if (videoElement.readyState >= 1 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+      done('already-ready');
+    }
   });
 }
 

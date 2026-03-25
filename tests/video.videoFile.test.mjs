@@ -39,6 +39,7 @@ test('waitForVideoLoad resolves once dimensions are available', async () => {
   const originalClearTimeout = globalThis.clearTimeout;
   globalThis.setTimeout = () => 1;
   globalThis.clearTimeout = () => {};
+  let loadCalled = false;
 
   try {
     const videoElement = {
@@ -51,6 +52,9 @@ test('waitForVideoLoad resolves once dimensions are available', async () => {
       removeEventListener(name) {
         listeners.delete(name);
       },
+      load() {
+        loadCalled = true;
+      },
       src: '',
       loop: true
     };
@@ -62,14 +66,22 @@ test('waitForVideoLoad resolves once dimensions are available', async () => {
       logger: { log() {}, warn() {}, error() {} }
     });
 
-    listeners.get('loadedmetadata')();
     await promise;
+    assert.equal(loadCalled, true);
     assert.equal(videoElement.src, 'blob:video');
     assert.equal(videoElement.loop, false);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
   }
+});
+
+test('waitForVideoLoad rejects invalid inputs', async () => {
+  await assert.rejects(() => waitForVideoLoad({
+    videoElement: null,
+    src: '',
+    logger: { log() {}, warn() {}, error() {} }
+  }));
 });
 
 test('startVideoPlaybackForAnalysis resets playback and stamps the epoch base', async () => {
