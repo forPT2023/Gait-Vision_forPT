@@ -85,6 +85,9 @@
     body[data-device-mode="phone"][data-phone-flow-view="capture"] #phone-stage-panel .phone-stage-analyzing,
     body[data-device-mode="phone"][data-phone-flow-view="results"] #phone-stage-panel .phone-stage-analyzing,
     body[data-device-mode="phone"][data-phone-flow-view="analyzing"] #phone-stage-panel .phone-stage-results { display: none !important; }
+    body[data-device-mode="phone"][data-phone-capture-surface="hidden"] #canvas-container { display: none !important; }
+    #phone-capture-hint { display: none; margin: 0.45rem 0.75rem 0; padding: 0.7rem 0.85rem; border-radius: 0.75rem; border: 1px dashed #475569; background: rgba(15, 23, 42, 0.8); color: #cbd5e1; font-size: 0.8rem; line-height: 1.45; }
+    body[data-device-mode="phone"][data-phone-capture-surface="hidden"] #phone-capture-hint { display: block; }
     #charts-container { background: #0f1419; overflow: auto; padding: 1rem; border: 1px solid #1e293b; border-radius: 1rem; }
     .chart-wrapper { background: #1a1f2e; border-radius: 0.75rem; padding: 1rem; margin-bottom: 1rem; border: 1px solid #2d3748; }
     .chart-wrapper:last-child { margin-bottom: 0; }
@@ -289,7 +292,7 @@
       <div class="phone-stage-capture">
         <div class="phone-stage-title">撮影方法を選択して解析を開始</div>
         <div class="phone-stage-grid">
-          <button id="btn-phone-stage-camera" class="primary-action">📷 カメラ起動</button>
+          <button id="btn-phone-stage-camera" class="primary-action">📷 撮影する</button>
           <button id="btn-phone-stage-video" class="warn-action">📁 動画を選択</button>
           <button id="btn-phone-stage-analyze" class="accent-action">▶️ 解析開始</button>
         </div>
@@ -307,6 +310,7 @@
         </div>
       </div>
     </div>
+    <div id="phone-capture-hint">スマホ版ではプレビュー表示を省略しています。<br>「撮影する」または「動画を選択」→「解析開始」を実行してください。</div>
 
     <div id="main-layout">
       <div id="canvas-container">

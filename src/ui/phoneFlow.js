@@ -16,6 +16,7 @@ export function getPhoneFlowState({
     return {
       visible: false,
       view: 'hidden',
+      captureSurfaceVisible: true,
       stageLabel: '',
       metaLabel: '',
       chartsVisible: true,
@@ -29,6 +30,7 @@ export function getPhoneFlowState({
     return {
       visible: true,
       view: normalizedView,
+      captureSurfaceVisible: false,
       stageLabel: 'Step 2/3 解析中',
       metaLabel: `解析点: ${Math.max(0, analysisPoints)} ・ 歩数: ${Math.max(0, stepCount)}`,
       chartsVisible: false,
@@ -42,6 +44,7 @@ export function getPhoneFlowState({
     return {
       visible: true,
       view: normalizedView,
+      captureSurfaceVisible: false,
       stageLabel: 'Step 3/3 結果確認',
       metaLabel: `解析点: ${Math.max(0, analysisPoints)} ・ 推定歩数: ${Math.max(0, stepCount)}`,
       chartsVisible: true,
@@ -54,6 +57,7 @@ export function getPhoneFlowState({
   return {
     visible: true,
     view: normalizedView,
+    captureSurfaceVisible: false,
     stageLabel: 'Step 1/3 撮影',
     metaLabel: hasAnalysisData
       ? `前回結果: 解析点 ${Math.max(0, analysisPoints)} ・ 推定歩数 ${Math.max(0, stepCount)}`
@@ -80,6 +84,7 @@ export function applyPhoneFlowUi({
   const mainApp = documentRef.getElementById('main-app');
 
   body?.setAttribute('data-phone-flow-view', state.view);
+  body?.setAttribute('data-phone-capture-surface', state.captureSurfaceVisible ? 'visible' : 'hidden');
   mainApp?.setAttribute('data-phone-flow-view', state.view);
 
   if (banner) {

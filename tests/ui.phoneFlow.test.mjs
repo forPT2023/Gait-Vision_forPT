@@ -14,6 +14,7 @@ test('getPhoneFlowState keeps non-phone modes hidden and charts visible', () => 
   }), {
     visible: false,
     view: 'hidden',
+    captureSurfaceVisible: true,
     stageLabel: '',
     metaLabel: '',
     chartsVisible: true,
@@ -34,6 +35,7 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
   }), {
     visible: true,
     view: 'capture',
+    captureSurfaceVisible: false,
     stageLabel: 'Step 1/3 撮影',
     metaLabel: '前回結果: まだありません',
     chartsVisible: false,
@@ -52,6 +54,7 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
   }), {
     visible: true,
     view: 'analyzing',
+    captureSurfaceVisible: false,
     stageLabel: 'Step 2/3 解析中',
     metaLabel: '解析点: 42 ・ 歩数: 8',
     chartsVisible: false,
@@ -70,6 +73,7 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
   }), {
     visible: true,
     view: 'results',
+    captureSurfaceVisible: false,
     stageLabel: 'Step 3/3 結果確認',
     metaLabel: '解析点: 108 ・ 推定歩数: 23',
     chartsVisible: true,
@@ -126,6 +130,7 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
     state: {
       visible: true,
       view: 'results',
+      captureSurfaceVisible: false,
       stageLabel: 'Step 3/3 結果確認',
       metaLabel: '解析点: 108 ・ 推定歩数: 23',
       chartsVisible: true,
@@ -136,6 +141,7 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
   });
 
   assert.equal(body.attributes['data-phone-flow-view'], 'results');
+  assert.equal(body.attributes['data-phone-capture-surface'], 'hidden');
   assert.equal(mainApp.attributes['data-phone-flow-view'], 'results');
   assert.deepEqual(banner.classList.calls, [['hidden-panel', false]]);
   assert.equal(banner.dataset.view, 'results');
