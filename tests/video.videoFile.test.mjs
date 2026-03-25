@@ -103,6 +103,7 @@ test('waitForVideoLoad polling fallback resolves when readiness appears later', 
       readyState: 0,
       videoWidth: 0,
       videoHeight: 0,
+      duration: Number.NaN,
       addEventListener(name, fn) {
         listeners.set(name, fn);
       },
@@ -128,6 +129,44 @@ test('waitForVideoLoad polling fallback resolves when readiness appears later', 
     intervals[0]();
 
     await promise;
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('waitForVideoLoad resolves for mobile videos that decode frames before dimensions are available', async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  globalThis.setTimeout = () => 1;
+  globalThis.clearTimeout = () => {};
+  globalThis.setInterval = () => 2;
+  globalThis.clearInterval = () => {};
+
+  try {
+    const videoElement = {
+      readyState: 2,
+      videoWidth: 0,
+      videoHeight: 0,
+      duration: 8.5,
+      addEventListener() {},
+      removeEventListener() {},
+      load() {},
+      removeAttribute() {},
+      src: '',
+      loop: true
+    };
+
+    await waitForVideoLoad({
+      videoElement,
+      src: 'blob:mobile-video',
+      timeoutMs: 10,
+      logger: { log() {}, warn() {}, error() {} }
+    });
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
