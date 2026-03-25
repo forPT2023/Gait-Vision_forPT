@@ -21,9 +21,11 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
 
     const timeout = setTimeout(() => {
       logger.error('[Video] ❌ Load timeout after 30 seconds');
+      if (pollInterval) clearInterval(pollInterval);
       reject(new Error('Timeout'));
     }, timeoutMs);
 
+    let pollInterval = null;
     let resolved = false;
     const done = (eventName) => {
       if (resolved) {
@@ -35,6 +37,7 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
       if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
         resolved = true;
         clearTimeout(timeout);
+        if (pollInterval) clearInterval(pollInterval);
         cleanup();
         logger.log('[Video] ✅ Loaded successfully:', videoElement.videoWidth, 'x', videoElement.videoHeight);
         resolve();
@@ -47,6 +50,7 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
       const mediaError = videoElement.error;
       logger.error('[Video] ❌ Load error:', error, mediaError);
       clearTimeout(timeout);
+      if (pollInterval) clearInterval(pollInterval);
       cleanup();
       reject(new Error(mediaError?.message || 'Load failed'));
     };
@@ -70,6 +74,10 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     videoElement.addEventListener('canplaythrough', doneCanplaythrough);
     videoElement.addEventListener('error', onError);
 
+    if (videoElement.src) {
+      videoElement.removeAttribute?.('src');
+      videoElement.load?.();
+    }
     videoElement.loop = false;
     videoElement.src = src;
     try {
@@ -81,6 +89,13 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     if (videoElement.readyState >= 1 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
       done('already-ready');
     }
+
+    pollInterval = setInterval(() => {
+      if (resolved) return;
+      if (videoElement.readyState >= 1 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+        done('polling-ready');
+      }
+    }, 150);
   });
 }
 
