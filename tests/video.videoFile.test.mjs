@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { configureVideoElementForFile, createVideoFileInput, startVideoPlaybackForAnalysis, waitForVideoLoad } from '../src/video/videoFile.js';
+import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from '../src/video/videoFile.js';
 
 test('createVideoFileInput builds a file input configured for videos', () => {
   const input = createVideoFileInput({
@@ -15,6 +15,81 @@ test('createVideoFileInput builds a file input configured for videos', () => {
 
   assert.equal(input.type, 'file');
   assert.equal(input.accept, 'video/*');
+  assert.equal(input.multiple, false);
+});
+
+test('triggerVideoFilePicker appends detached input and uses showPicker when available', () => {
+  const appended = [];
+  const originalDocument = globalThis.document;
+  globalThis.document = {
+    body: {
+      appendChild(node) {
+        appended.push(node);
+      }
+    }
+  };
+
+  const input = {
+    isConnected: false,
+    style: {},
+    value: 'dummy',
+    showPickerCalled: false,
+    showPicker() {
+      this.showPickerCalled = true;
+    }
+  };
+
+  try {
+    const triggerMethod = triggerVideoFilePicker({
+      input,
+      logger: { warn() {} }
+    });
+    assert.equal(triggerMethod, 'showPicker');
+    assert.equal(appended.length, 1);
+    assert.equal(input.showPickerCalled, true);
+    assert.equal(input.value, '');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('triggerVideoFilePicker falls back to click when showPicker fails', () => {
+  const input = {
+    isConnected: true,
+    style: {},
+    value: 'dummy',
+    clickCalled: false,
+    showPicker() {
+      throw new Error('Unsupported');
+    },
+    click() {
+      this.clickCalled = true;
+    }
+  };
+
+  const triggerMethod = triggerVideoFilePicker({
+    input,
+    logger: { warn() {} }
+  });
+
+  assert.equal(triggerMethod, 'click');
+  assert.equal(input.clickCalled, true);
+  assert.equal(input.value, '');
+});
+
+test('disposeVideoFileInput removes input from DOM', () => {
+  let removed = false;
+  const input = {
+    parentNode: {
+      removeChild(node) {
+        assert.equal(node, input);
+        removed = true;
+      }
+    }
+  };
+
+  disposeVideoFileInput({ input });
+  assert.equal(removed, true);
 });
 
 test('configureVideoElementForFile applies the expected playback flags', () => {

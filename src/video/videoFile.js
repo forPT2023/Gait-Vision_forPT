@@ -2,7 +2,48 @@ export function createVideoFileInput({ documentRef = document, accept = 'video/*
   const input = documentRef.createElement('input');
   input.type = 'file';
   input.accept = accept;
+  input.multiple = false;
   return input;
+}
+
+export function triggerVideoFilePicker({
+  input,
+  logger = console
+} = {}) {
+  if (!input) {
+    throw new Error('Video file input is required');
+  }
+
+  if (!input.isConnected && document?.body) {
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    input.style.width = '1px';
+    input.style.height = '1px';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    document.body.appendChild(input);
+  }
+
+  input.value = '';
+
+  if (typeof input.showPicker === 'function') {
+    try {
+      input.showPicker();
+      return 'showPicker';
+    } catch (error) {
+      logger.warn('[Video] showPicker() failed, fallback to click():', error);
+    }
+  }
+
+  input.click();
+  return 'click';
+}
+
+export function disposeVideoFileInput({ input } = {}) {
+  if (!input) return;
+  if (input.parentNode) {
+    input.parentNode.removeChild(input);
+  }
 }
 
 export function configureVideoElementForFile(videoElement) {
