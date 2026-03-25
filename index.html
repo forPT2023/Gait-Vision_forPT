@@ -788,9 +788,14 @@
 
       if (videoButton) videoButton.disabled = isAnalyzing || isRecording || isLoadingVideo;
       if (analyzeButton) {
-        const recordButton = document.getElementById('btn-record');
-        analyzeButton.disabled = recordButton.disabled;
-        analyzeButton.textContent = recordButton.textContent.includes('停止') ? '⏹ 解析停止' : '▶️ 解析開始';
+        const sourceMode = getAnalysisSourceMode();
+        const hasSource = sourceMode === 'video'
+          ? Boolean(videoFileUrl)
+          : Boolean(videoElement.srcObject);
+        const canStart = !isAnalyzing && !isLoadingVideo && hasSource;
+        const canStop = isAnalyzing;
+        analyzeButton.disabled = !(canStart || canStop);
+        analyzeButton.textContent = canStop ? '⏹ 解析停止' : '▶️ 解析開始';
       }
       if (saveButton) saveButton.disabled = state.analyzedVideoDisabled;
       if (reportButton) reportButton.disabled = state.reportDisabled;
@@ -1342,6 +1347,7 @@
           // Update UI
           const recordBtn = document.getElementById('btn-record');
           setRecordButtonForVideoMode(recordBtn);
+          syncDeviceModeUi();
 
           showNotification('動画読み込み完了', 'success');
           console.log('[Video] Load complete - ready to start analysis');
@@ -1356,9 +1362,11 @@
 
           const recordBtn = document.getElementById('btn-record');
           setRecordButtonForVideoMode(recordBtn, { disabled: true });
+          syncDeviceModeUi();
         } finally {
           // Always reset loading flag
           isLoadingVideo = false;
+          syncPhoneStageActions();
         }
       };
 
@@ -2320,7 +2328,7 @@
       loadVideoFile();
     });
 
-    document.getElementById('btn-record').addEventListener('click', async () => {
+    async function handleRecordAction() {
       // Video mode: start/stop analysis
       if (getAnalysisSourceMode() === 'video') {
         if (isAnalyzing) {
@@ -2339,7 +2347,9 @@
           startRecording();
         }
       }
-    });
+    }
+
+    document.getElementById('btn-record').addEventListener('click', handleRecordAction);
 
     document.getElementById('btn-save-recording').addEventListener('click', saveRecordedVideo);
     document.getElementById('btn-discard-recording').addEventListener('click', discardRecordedVideo);
@@ -2358,9 +2368,7 @@
     document.getElementById('btn-phone-stage-video').addEventListener('click', () => {
       loadVideoFile();
     });
-    document.getElementById('btn-phone-stage-analyze').addEventListener('click', () => {
-      document.getElementById('btn-record').click();
-    });
+    document.getElementById('btn-phone-stage-analyze').addEventListener('click', handleRecordAction);
     document.getElementById('btn-phone-stage-save').addEventListener('click', saveAnalyzedVideo);
     document.getElementById('btn-phone-stage-report').addEventListener('click', generateReport);
     document.getElementById('btn-phone-stage-csv').addEventListener('click', exportCSV);
