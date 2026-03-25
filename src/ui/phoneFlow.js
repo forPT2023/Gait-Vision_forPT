@@ -67,7 +67,7 @@ export function getPhoneFlowState({
     toggleLabel: hasAnalysisData ? '📈 結果を見る' : '📈 結果待ち',
     message: hasAnalysisData
       ? 'スマホ版: 取得ステップです。撮影/アップロード後に結果確認へ切り替えられます。'
-      : 'スマホ版: 取得ステップです。標準カメラ撮影または動画アップロード後に解析してください。'
+      : 'スマホ版: 取得ステップです。動画を撮影またはアップロードしてから解析してください。'
   };
 }
 

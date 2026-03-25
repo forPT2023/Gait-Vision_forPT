@@ -285,7 +285,7 @@
 
     <div id="phone-flow-banner" class="hidden-panel" data-view="capture">
       <div>
-        <div id="phone-flow-message">ステップ1: スマホの標準カメラ撮影または既存動画アップロードを選択してください。</div>
+        <div id="phone-flow-message">ステップ1: スマホで動画を撮影またはアップロードしてください。</div>
         <div id="phone-flow-meta">前回結果: まだありません</div>
         <div id="phone-flow-quick-actions" class="phone-results-only">
           <button id="btn-phone-analyzed-video" disabled>💾 解析動画</button>
@@ -299,8 +299,7 @@
       <div class="phone-stage-capture">
         <div class="phone-stage-title">① 動画の取得（撮影 or アップロード）</div>
         <div class="phone-stage-grid">
-          <button id="btn-phone-stage-camera" class="primary-action">📷 標準カメラで撮影</button>
-          <button id="btn-phone-stage-video" class="warn-action">📁 既存動画をアップロード</button>
+          <button id="btn-phone-stage-video" class="primary-action">📹 動画を撮影 / アップロード</button>
           <button id="btn-phone-stage-analyze" class="accent-action">▶️ ② 解析を開始</button>
         </div>
         <div class="phone-stage-note">※ 解析完了後に、解析動画・グラフ閲覧と結果出力へ進みます。</div>
@@ -778,7 +777,6 @@
       });
 
       const stagePanel = document.getElementById('phone-stage-panel');
-      const cameraButton = document.getElementById('btn-phone-stage-camera');
       const videoButton = document.getElementById('btn-phone-stage-video');
       const analyzeButton = document.getElementById('btn-phone-stage-analyze');
       const saveButton = document.getElementById('btn-phone-stage-save');
@@ -788,8 +786,7 @@
       if (!stagePanel) return;
       stagePanel.classList.toggle('hidden-panel', deviceMode !== 'phone');
 
-      if (cameraButton) cameraButton.disabled = isAnalyzing || isRecording;
-      if (videoButton) videoButton.disabled = isAnalyzing || isLoadingVideo;
+      if (videoButton) videoButton.disabled = isAnalyzing || isRecording || isLoadingVideo;
       if (analyzeButton) {
         const recordButton = document.getElementById('btn-record');
         analyzeButton.disabled = recordButton.disabled;
@@ -2358,11 +2355,8 @@
     document.getElementById('btn-phone-analyzed-video').addEventListener('click', saveAnalyzedVideo);
     document.getElementById('btn-phone-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-phone-report').addEventListener('click', generateReport);
-    document.getElementById('btn-phone-stage-camera').addEventListener('click', () => {
-      document.getElementById('btn-camera').click();
-    });
     document.getElementById('btn-phone-stage-video').addEventListener('click', () => {
-      document.getElementById('btn-video').click();
+      loadVideoFile();
     });
     document.getElementById('btn-phone-stage-analyze').addEventListener('click', () => {
       document.getElementById('btn-record').click();
