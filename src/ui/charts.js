@@ -12,6 +12,28 @@ export function toChartPoint(xValue, value) {
   return { x: xValue, y: safeValue };
 }
 
+export function adjustChartYRange({ chart, chartName, nextValue, definition, logger = console }) {
+  if (!chart?.options?.scales?.y || !definition?.y || !Number.isFinite(nextValue)) return;
+
+  const yAxis = chart.options.scales.y;
+  const currentMin = Number.isFinite(yAxis.min) ? yAxis.min : definition.y.min;
+  const currentMax = Number.isFinite(yAxis.max) ? yAxis.max : definition.y.max;
+  const span = Math.max(1, currentMax - currentMin);
+  const padding = Math.max(1, span * 0.08);
+
+  let nextMin = currentMin;
+  let nextMax = currentMax;
+
+  if (nextValue < currentMin) nextMin = Math.floor(nextValue - padding);
+  if (nextValue > currentMax) nextMax = Math.ceil(nextValue + padding);
+
+  if (nextMin !== currentMin || nextMax !== currentMax) {
+    yAxis.min = nextMin;
+    yAxis.max = nextMax;
+    logger.log(`[Chart] Expanded ${chartName} y-range -> [${nextMin}, ${nextMax}] for value: ${nextValue}`);
+  }
+}
+
 export function createChartController({ ChartCtor, document, getVideoContext, notifyReset = () => {}, logger = console }) {
   const charts = {};
   let lastChartUpdateTime = 0;
@@ -100,10 +122,15 @@ export function createChartController({ ChartCtor, document, getVideoContext, no
   }
 
   function resetCharts() {
-    Object.values(charts).forEach((chart) => {
+    Object.entries(charts).forEach(([key, chart]) => {
       chart.data.datasets.forEach((dataset) => {
         dataset.data = [];
       });
+      const definition = CHART_DEFINITIONS[key];
+      if (definition?.y) {
+        chart.options.scales.y.min = definition.y.min;
+        chart.options.scales.y.max = definition.y.max;
+      }
       chart.update('none');
     });
 
@@ -129,7 +156,15 @@ export function createChartController({ ChartCtor, document, getVideoContext, no
     const pushPoint = (chartName, datasetIndex, value) => {
       const chart = charts[chartName];
       if (chart?.data?.datasets?.[datasetIndex]) {
-        chart.data.datasets[datasetIndex].data.push(toChartPoint(xValue, value));
+        const safeValue = (typeof value === 'number' && Number.isFinite(value)) ? value : 0;
+        adjustChartYRange({
+          chart,
+          chartName,
+          nextValue: safeValue,
+          definition: CHART_DEFINITIONS[chartName],
+          logger
+        });
+        chart.data.datasets[datasetIndex].data.push(toChartPoint(xValue, safeValue));
       }
     };
 

@@ -37,8 +37,12 @@ test('waitForVideoLoad resolves once dimensions are available', async () => {
   const listeners = new Map();
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
   globalThis.setTimeout = () => 1;
   globalThis.clearTimeout = () => {};
+  globalThis.setInterval = () => 2;
+  globalThis.clearInterval = () => {};
   let loadCalled = false;
 
   try {
@@ -55,6 +59,7 @@ test('waitForVideoLoad resolves once dimensions are available', async () => {
       load() {
         loadCalled = true;
       },
+      removeAttribute() {},
       src: '',
       loop: true
     };
@@ -73,6 +78,61 @@ test('waitForVideoLoad resolves once dimensions are available', async () => {
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('waitForVideoLoad polling fallback resolves when readiness appears later', async () => {
+  const listeners = new Map();
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const intervals = [];
+  globalThis.setTimeout = () => 1;
+  globalThis.clearTimeout = () => {};
+  globalThis.setInterval = (fn) => {
+    intervals.push(fn);
+    return 7;
+  };
+  globalThis.clearInterval = () => {};
+
+  try {
+    const videoElement = {
+      readyState: 0,
+      videoWidth: 0,
+      videoHeight: 0,
+      addEventListener(name, fn) {
+        listeners.set(name, fn);
+      },
+      removeEventListener(name) {
+        listeners.delete(name);
+      },
+      load() {},
+      removeAttribute() {},
+      src: '',
+      loop: true
+    };
+
+    const promise = waitForVideoLoad({
+      videoElement,
+      src: 'blob:video',
+      timeoutMs: 10,
+      logger: { log() {}, warn() {}, error() {} }
+    });
+
+    videoElement.readyState = 1;
+    videoElement.videoWidth = 1280;
+    videoElement.videoHeight = 720;
+    intervals[0]();
+
+    await promise;
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
   }
 });
 
