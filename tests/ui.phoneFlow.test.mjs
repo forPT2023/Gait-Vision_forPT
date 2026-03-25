@@ -36,12 +36,12 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     visible: true,
     view: 'capture',
     captureSurfaceVisible: false,
-    stageLabel: 'Step 1/3 撮影',
+    stageLabel: 'Step 1/3 取得',
     metaLabel: '前回結果: まだありません',
     chartsVisible: false,
     toggleEnabled: false,
     toggleLabel: '📈 結果待ち',
-    message: 'スマホ版: 撮影ステップです。撮影または動画選択後に解析してください。'
+    message: 'スマホ版: 取得ステップです。標準カメラ撮影または動画アップロード後に解析してください。'
   });
 
   assert.deepEqual(getPhoneFlowState({
@@ -55,12 +55,12 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     visible: true,
     view: 'analyzing',
     captureSurfaceVisible: false,
-    stageLabel: 'Step 2/3 解析中',
+    stageLabel: 'Step 2/3 解析',
     metaLabel: '解析点: 42 ・ 歩数: 8',
     chartsVisible: false,
     toggleEnabled: false,
     toggleLabel: '解析中…',
-    message: 'スマホ版: 解析中です。撮影設定は一時的に非表示になります。'
+    message: 'スマホ版: 解析中です。解析動画とグラフを準備しています。'
   });
 
   assert.deepEqual(getPhoneFlowState({
@@ -74,12 +74,12 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     visible: true,
     view: 'results',
     captureSurfaceVisible: false,
-    stageLabel: 'Step 3/3 結果確認',
+    stageLabel: 'Step 3/3 結果',
     metaLabel: '解析点: 108 ・ 推定歩数: 23',
     chartsVisible: true,
     toggleEnabled: true,
     toggleLabel: '🎥 撮影に戻る',
-    message: 'スマホ版: 結果ステップです。グラフ・レポート・CSVを確認できます。'
+    message: 'スマホ版: 結果画面です。解析動画・グラフ閲覧と結果出力ができます。'
   });
 });
 
@@ -131,7 +131,7 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
       visible: true,
       view: 'results',
       captureSurfaceVisible: false,
-      stageLabel: 'Step 3/3 結果確認',
+      stageLabel: 'Step 3/3 結果',
       metaLabel: '解析点: 108 ・ 推定歩数: 23',
       chartsVisible: true,
       toggleEnabled: true,
@@ -145,7 +145,7 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
   assert.equal(mainApp.attributes['data-phone-flow-view'], 'results');
   assert.deepEqual(banner.classList.calls, [['hidden-panel', false]]);
   assert.equal(banner.dataset.view, 'results');
-  assert.equal(stage.textContent, 'Step 3/3 結果確認');
+  assert.equal(stage.textContent, 'Step 3/3 結果');
   assert.equal(meta.textContent, '解析点: 108 ・ 推定歩数: 23');
   assert.equal(message.textContent, 'スマホ版: 結果ステップです。');
   assert.equal(toggleButton.style.display, 'inline-flex');
