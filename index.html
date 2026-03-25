@@ -61,11 +61,37 @@
     #phone-flow-quick-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.45rem; }
     #phone-flow-quick-actions button { border: 1px solid #475569; background: #1e293b; color: #e2e8f0; border-radius: 0.45rem; padding: 0.3rem 0.55rem; font-size: 0.72rem; font-weight: 600; cursor: pointer; }
     #phone-flow-quick-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+    #phone-stage-panel { margin: 0.45rem 0.75rem 0; padding: 0.75rem; border-radius: 0.85rem; border: 1px solid #334155; background: rgba(15, 23, 42, 0.86); }
+    .phone-stage-title { font-size: 0.84rem; color: #cbd5e1; margin-bottom: 0.55rem; font-weight: 700; }
+    .phone-stage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+    .phone-stage-grid button { width: 100%; border-radius: 0.7rem; border: 1px solid #475569; background: #1e293b; color: #e2e8f0; font-size: 0.85rem; font-weight: 700; padding: 0.75rem 0.5rem; }
+    .phone-stage-grid button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .phone-stage-grid .primary-action { grid-column: 1 / -1; background: #2563eb; border-color: #3b82f6; color: #fff; }
+    .phone-stage-grid .primary-action:disabled { background: #1e3a8a; }
+    .phone-stage-grid .warn-action { background: #334155; border-color: #64748b; }
+    .phone-stage-grid .success-action { background: #065f46; border-color: #10b981; color: #d1fae5; }
+    .phone-stage-grid .accent-action { background: #1e293b; border-color: #38bdf8; color: #bae6fd; }
+    .phone-stage-grid .muted-action { background: #111827; border-color: #475569; color: #cbd5e1; }
     body[data-device-mode="phone"][data-phone-flow-view="capture"] .phone-results-only,
     body[data-device-mode="phone"][data-phone-flow-view="analyzing"] .phone-results-only,
     body[data-device-mode="phone"][data-phone-flow-view="results"] .phone-capture-only { display: none !important; }
     body[data-device-mode="phone"][data-phone-flow-view="analyzing"] .phone-setup-only,
     body[data-device-mode="phone"][data-phone-flow-view="results"] .phone-setup-only { display: none !important; }
+    body[data-device-mode="phone"] #phone-stage-panel { display: block; }
+    body:not([data-device-mode="phone"]) #phone-stage-panel { display: none !important; }
+    body[data-device-mode="phone"][data-phone-flow-view="analyzing"] #phone-stage-panel .phone-stage-capture,
+    body[data-device-mode="phone"][data-phone-flow-view="results"] #phone-stage-panel .phone-stage-capture,
+    body[data-device-mode="phone"][data-phone-flow-view="capture"] #phone-stage-panel .phone-stage-results,
+    body[data-device-mode="phone"][data-phone-flow-view="capture"] #phone-stage-panel .phone-stage-analyzing,
+    body[data-device-mode="phone"][data-phone-flow-view="results"] #phone-stage-panel .phone-stage-analyzing,
+    body[data-device-mode="phone"][data-phone-flow-view="analyzing"] #phone-stage-panel .phone-stage-results { display: none !important; }
+    body[data-device-mode="phone"][data-phone-flow-view="capture"] #main-layout {
+      display: none !important;
+    }
+    body[data-device-mode="phone"][data-phone-flow-view="analyzing"] #main-layout,
+    body[data-device-mode="phone"][data-phone-flow-view="results"] #main-layout {
+      display: flex;
+    }
     #charts-container { background: #0f1419; overflow: auto; padding: 1rem; border: 1px solid #1e293b; border-radius: 1rem; }
     .chart-wrapper { background: #1a1f2e; border-radius: 0.75rem; padding: 1rem; margin-bottom: 1rem; border: 1px solid #2d3748; }
     .chart-wrapper:last-child { margin-bottom: 0; }
@@ -97,6 +123,8 @@
       #charts-container { display: flex; gap: 0.75rem; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; padding: 0.75rem; }
       .chart-wrapper { min-width: min(82vw, 320px); margin-bottom: 0; scroll-snap-align: start; }
       .chart-wrapper canvas { height: 180px !important; }
+      body[data-device-mode="phone"] #control-bar .tooltip { display: none !important; }
+      body[data-device-mode="phone"] #control-bar { padding-top: 0.35rem; padding-bottom: calc(0.45rem + env(safe-area-inset-bottom, 0px)); min-height: 1.5rem; }
     }
     @media (max-width: 640px) and (orientation: portrait) {
       header h1 { font-size: 1.05rem !important; }
@@ -263,6 +291,28 @@
         </div>
       </div>
       <span id="phone-flow-stage">Step 1/3 撮影</span>
+    </div>
+    <div id="phone-stage-panel" class="hidden-panel">
+      <div class="phone-stage-capture">
+        <div class="phone-stage-title">撮影方法を選択して解析を開始</div>
+        <div class="phone-stage-grid">
+          <button id="btn-phone-stage-camera" class="primary-action">📷 カメラ起動</button>
+          <button id="btn-phone-stage-video" class="warn-action">📁 動画を選択</button>
+          <button id="btn-phone-stage-analyze" class="accent-action">▶️ 解析開始</button>
+        </div>
+      </div>
+      <div class="phone-stage-analyzing">
+        <div class="phone-stage-title">解析中です。完了までお待ちください…</div>
+      </div>
+      <div class="phone-stage-results">
+        <div class="phone-stage-title">解析完了。保存・結果確認</div>
+        <div class="phone-stage-grid">
+          <button id="btn-phone-stage-save" class="success-action">💾 解析動画を保存</button>
+          <button id="btn-phone-stage-report" class="accent-action">📄 レポート表示</button>
+          <button id="btn-phone-stage-csv" class="muted-action">📊 CSVダウンロード</button>
+          <button id="btn-phone-stage-back" class="warn-action">🎥 撮影に戻る</button>
+        </div>
+      </div>
     </div>
 
     <div id="main-layout">
@@ -664,6 +714,38 @@
         documentRef: document,
         state
       });
+
+      syncPhoneStageActions(state);
+    }
+
+    function syncPhoneStageActions(quickActionState = null) {
+      const state = quickActionState || getPhoneQuickActionDisabledState({
+        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled,
+        reportDisabled: document.getElementById('btn-report').disabled,
+        csvDisabled: document.getElementById('btn-csv').disabled
+      });
+
+      const stagePanel = document.getElementById('phone-stage-panel');
+      const cameraButton = document.getElementById('btn-phone-stage-camera');
+      const videoButton = document.getElementById('btn-phone-stage-video');
+      const analyzeButton = document.getElementById('btn-phone-stage-analyze');
+      const saveButton = document.getElementById('btn-phone-stage-save');
+      const reportButton = document.getElementById('btn-phone-stage-report');
+      const csvButton = document.getElementById('btn-phone-stage-csv');
+
+      if (!stagePanel) return;
+      stagePanel.classList.toggle('hidden-panel', deviceMode !== 'phone');
+
+      if (cameraButton) cameraButton.disabled = isAnalyzing || isRecording;
+      if (videoButton) videoButton.disabled = isAnalyzing || isLoadingVideo;
+      if (analyzeButton) {
+        const recordButton = document.getElementById('btn-record');
+        analyzeButton.disabled = recordButton.disabled;
+        analyzeButton.textContent = recordButton.textContent.includes('停止') ? '⏹ 解析停止' : '▶️ 解析開始';
+      }
+      if (saveButton) saveButton.disabled = state.analyzedVideoDisabled;
+      if (reportButton) reportButton.disabled = state.reportDisabled;
+      if (csvButton) csvButton.disabled = state.csvDisabled;
     }
 
     function syncDeviceModeUi() {
@@ -675,6 +757,7 @@
         isStandalone: window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
       });
       isMobile = deviceMode !== 'desktop';
+      document.body.setAttribute('data-analysis-plane', currentPlane);
       const phoneFlowState = getPhoneFlowState({
         deviceMode,
         currentView: phoneFlowView,
@@ -712,13 +795,27 @@
     function resizeCanvas() {
       const container = document.getElementById('canvas-container');
       const isPortraitViewport = window.innerHeight > window.innerWidth;
+      const isPhoneMode = deviceMode === 'phone';
+
+      if (isPhoneMode) {
+        if (currentPlane === 'frontal') {
+          container.style.height = 'min(56dvh, 520px)';
+          container.style.minHeight = '340px';
+        } else {
+          container.style.height = 'min(42dvh, 360px)';
+          container.style.minHeight = '230px';
+        }
+      } else {
+        container.style.height = '';
+        container.style.minHeight = '';
+      }
+
       const displaySource = resolveDisplaySourceDimensions({
         sourceWidth: videoElement.videoWidth,
         sourceHeight: videoElement.videoHeight,
         isPortraitViewport,
-        // Keep native camera frame aspect to avoid stretched preview on phones.
-        // Orientation correction should be handled by camera restart / CSS layout, not by swapping dimensions.
-        preferViewportOrientation: false
+        // On phone frontal mode, force portrait-oriented fitting so the canvas fills the vertical frame.
+        preferViewportOrientation: isPhoneMode && currentPlane === 'frontal'
       });
       const layout = calculateCanvasLayout({
         containerWidth: container.clientWidth,
@@ -1310,6 +1407,7 @@
 
       // Reset analysis state
       isAnalyzing = true;
+      phoneFlowView = 'analyzing';
       analysisPlane = currentPlane;
       syncDeviceModeUi();
       ({
@@ -2150,6 +2248,8 @@
         chartsContainer: document.getElementById('charts-container'),
         currentPlane
       });
+      resizeCanvas();
+      syncDeviceModeUi();
       syncOrientationWarning();
       showNotification('前額面モード', 'success');
     });
@@ -2162,6 +2262,8 @@
         chartsContainer: document.getElementById('charts-container'),
         currentPlane
       });
+      resizeCanvas();
+      syncDeviceModeUi();
       syncOrientationWarning();
       showNotification('矢状面モード', 'success');
     });
@@ -2224,6 +2326,22 @@
     document.getElementById('btn-phone-analyzed-video').addEventListener('click', saveAnalyzedVideo);
     document.getElementById('btn-phone-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-phone-report').addEventListener('click', generateReport);
+    document.getElementById('btn-phone-stage-camera').addEventListener('click', () => {
+      document.getElementById('btn-camera').click();
+    });
+    document.getElementById('btn-phone-stage-video').addEventListener('click', () => {
+      document.getElementById('btn-video').click();
+    });
+    document.getElementById('btn-phone-stage-analyze').addEventListener('click', () => {
+      document.getElementById('btn-record').click();
+    });
+    document.getElementById('btn-phone-stage-save').addEventListener('click', saveAnalyzedVideo);
+    document.getElementById('btn-phone-stage-report').addEventListener('click', generateReport);
+    document.getElementById('btn-phone-stage-csv').addEventListener('click', exportCSV);
+    document.getElementById('btn-phone-stage-back').addEventListener('click', () => {
+      phoneFlowView = 'capture';
+      syncDeviceModeUi();
+    });
     document.getElementById('btn-reset-charts').addEventListener('click', () => chartController.resetCharts());
     document.getElementById('btn-export').addEventListener('click', exportAllData);
     document.getElementById('btn-settings').addEventListener('click', async () => {
