@@ -481,7 +481,7 @@
     import { calculateCanvasLayout, getDefaultVideoAspectRatio, resolveDisplaySourceDimensions, syncCanvasDisplaySize } from './src/video/display.js';
     import { buildAnalyzedVideoFilename, buildRecordingFilename, buildRecordingMetadata, closeSaveRecordingDialog, createCanvasRecordingSession, downloadBlob, formatRecordingInfoText, resetRecordedVideoState, showSaveRecordingDialog as showRecordingSaveDialog } from './src/video/recording.js';
     import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findClosestAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
-    import { configureVideoElementForFile, createVideoFileInput, startVideoPlaybackForAnalysis, waitForVideoLoad } from './src/video/videoFile.js';
+    import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     console.log(`${APP_VERSION_LABEL} (Fixed: Canvas Size & Graph Accuracy) - Initializing...`);
 
@@ -1247,6 +1247,17 @@
       }
 
       const input = createVideoFileInput({ documentRef: document });
+      let cleanupTimer = null;
+      let cleanedUp = false;
+      const cleanupInput = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        if (cleanupTimer) {
+          clearTimeout(cleanupTimer);
+          cleanupTimer = null;
+        }
+        disposeVideoFileInput({ input });
+      };
 
       console.log('[Video] File input created, opening dialog...');
 
@@ -1255,8 +1266,11 @@
         const file = e.target.files[0];
         if (!file) {
           console.log('[Video] No file selected');
+          cleanupInput();
           return;
         }
+
+        cleanupInput();
 
         isLoadingVideo = true;
         console.log('[Video] Starting load process for:', file.name);
@@ -1370,15 +1384,27 @@
         }
       };
 
+      input.oncancel = () => {
+        console.log('[Video] File selection canceled');
+        cleanupInput();
+      };
+
       // CRITICAL: Must call click() synchronously in the same event loop
       // Some browsers block programmatic click() if there's any async operation before it
       console.log('[Video] Calling input.click()...');
       try {
-        input.click();
-        console.log('[Video] input.click() called successfully');
+        const triggerMethod = triggerVideoFilePicker({
+          input,
+          logger: console
+        });
+        console.log(`[Video] File picker triggered via ${triggerMethod}`);
+        cleanupTimer = setTimeout(() => {
+          cleanupInput();
+        }, 60000);
       } catch (e) {
         console.error('[Video] ❌ Failed to trigger file dialog:', e);
         showNotification('ファイル選択ダイアログを開けませんでした', 'error');
+        cleanupInput();
       }
     }
 
