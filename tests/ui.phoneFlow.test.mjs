@@ -17,6 +17,8 @@ test('getPhoneFlowState keeps non-phone modes hidden and charts visible', () => 
     captureSurfaceVisible: true,
     stageLabel: '',
     metaLabel: '',
+    showMeta: false,
+    quickActionsVisible: false,
     chartsVisible: true,
     toggleEnabled: false,
     toggleLabel: '',
@@ -36,12 +38,14 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     visible: true,
     view: 'capture',
     captureSurfaceVisible: false,
-    stageLabel: 'Step 1/3 取得',
-    metaLabel: '前回結果: まだありません',
+    stageLabel: '取得',
+    metaLabel: '',
+    showMeta: false,
+    quickActionsVisible: false,
     chartsVisible: false,
     toggleEnabled: false,
     toggleLabel: '📈 結果待ち',
-    message: 'スマホ版: 取得ステップです。動画を撮影またはアップロードしてから解析してください。'
+    message: '動画を撮影/選択して解析を開始してください。'
   });
 
   assert.deepEqual(getPhoneFlowState({
@@ -55,12 +59,14 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     visible: true,
     view: 'analyzing',
     captureSurfaceVisible: false,
-    stageLabel: 'Step 2/3 解析',
-    metaLabel: '解析点: 42 ・ 歩数: 8',
+    stageLabel: '解析中',
+    metaLabel: '点:42 歩:8',
+    showMeta: true,
+    quickActionsVisible: false,
     chartsVisible: false,
     toggleEnabled: false,
     toggleLabel: '解析中…',
-    message: 'スマホ版: 解析中です。解析動画とグラフを準備しています。'
+    message: '解析中です…'
   });
 
   assert.deepEqual(getPhoneFlowState({
@@ -74,12 +80,14 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
     visible: true,
     view: 'results',
     captureSurfaceVisible: false,
-    stageLabel: 'Step 3/3 結果',
-    metaLabel: '解析点: 108 ・ 推定歩数: 23',
+    stageLabel: '結果',
+    metaLabel: '点:108 歩:23',
+    showMeta: true,
+    quickActionsVisible: true,
     chartsVisible: true,
     toggleEnabled: true,
     toggleLabel: '🎥 撮影に戻る',
-    message: 'スマホ版: 結果画面です。解析動画・グラフ閲覧と結果出力ができます。'
+    message: '結果を確認・出力できます。'
   });
 });
 
@@ -107,7 +115,8 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
   };
   const message = { textContent: '' };
   const stage = { textContent: '' };
-  const meta = { textContent: '' };
+  const meta = { textContent: '', style: {} };
+  const quickActions = { style: {} };
   const toggleButton = {
     style: {},
     disabled: false,
@@ -122,6 +131,7 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
         if (id === 'phone-flow-banner') return banner;
         if (id === 'phone-flow-message') return message;
         if (id === 'phone-flow-meta') return meta;
+        if (id === 'phone-flow-quick-actions') return quickActions;
         if (id === 'phone-flow-stage') return stage;
         if (id === 'btn-toggle-charts') return toggleButton;
         return null;
@@ -131,12 +141,14 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
       visible: true,
       view: 'results',
       captureSurfaceVisible: false,
-      stageLabel: 'Step 3/3 結果',
-      metaLabel: '解析点: 108 ・ 推定歩数: 23',
+      stageLabel: '結果',
+      metaLabel: '点:108 歩:23',
+      showMeta: true,
+      quickActionsVisible: true,
       chartsVisible: true,
       toggleEnabled: true,
       toggleLabel: '🎥 撮影に戻る',
-      message: 'スマホ版: 結果ステップです。'
+      message: '結果ステップです。'
     }
   });
 
@@ -145,12 +157,51 @@ test('applyPhoneFlowUi updates the banner and toggle button from state', () => {
   assert.equal(mainApp.attributes['data-phone-flow-view'], 'results');
   assert.deepEqual(banner.classList.calls, [['hidden-panel', false]]);
   assert.equal(banner.dataset.view, 'results');
-  assert.equal(stage.textContent, 'Step 3/3 結果');
-  assert.equal(meta.textContent, '解析点: 108 ・ 推定歩数: 23');
-  assert.equal(message.textContent, 'スマホ版: 結果ステップです。');
+  assert.equal(stage.textContent, '結果');
+  assert.equal(meta.textContent, '点:108 歩:23');
+  assert.equal(meta.style.display, 'block');
+  assert.equal(quickActions.style.display, 'flex');
+  assert.equal(message.textContent, '結果ステップです。');
   assert.equal(toggleButton.style.display, 'inline-flex');
   assert.equal(toggleButton.disabled, false);
   assert.equal(toggleButton.textContent, '🎥 撮影に戻る');
+});
+
+test('applyPhoneFlowUi hides meta when showMeta is false', () => {
+  const meta = { textContent: '', style: {} };
+  const quickActions = { style: {} };
+  const toggleButton = { style: {}, disabled: false, textContent: '' };
+  applyPhoneFlowUi({
+    documentRef: {
+      body: { setAttribute() {} },
+      getElementById(id) {
+        if (id === 'main-app') return { setAttribute() {} };
+        if (id === 'phone-flow-banner') return { classList: { toggle() {} }, dataset: {} };
+        if (id === 'phone-flow-message') return { textContent: '' };
+        if (id === 'phone-flow-stage') return { textContent: '' };
+        if (id === 'phone-flow-meta') return meta;
+        if (id === 'phone-flow-quick-actions') return quickActions;
+        if (id === 'btn-toggle-charts') return toggleButton;
+        return null;
+      }
+    },
+    state: {
+      visible: true,
+      view: 'capture',
+      captureSurfaceVisible: false,
+      stageLabel: '取得',
+      metaLabel: '',
+      showMeta: false,
+      quickActionsVisible: false,
+      chartsVisible: false,
+      toggleEnabled: false,
+      toggleLabel: '📈 結果待ち',
+      message: '動画を撮影/選択して解析を開始してください。'
+    }
+  });
+  assert.equal(meta.style.display, 'none');
+  assert.equal(quickActions.style.display, 'none');
+  assert.equal(toggleButton.style.display, 'none');
 });
 
 test('getPhoneQuickActionDisabledState normalizes disabled flags', () => {
@@ -169,9 +220,9 @@ test('getPhoneQuickActionDisabledState normalizes disabled flags', () => {
 });
 
 test('applyPhoneQuickActionState writes disabled states to phone quick action buttons', () => {
-  const analyzedVideoButton = { disabled: false };
-  const reportButton = { disabled: false };
-  const csvButton = { disabled: false };
+  const analyzedVideoButton = { disabled: false, style: {} };
+  const reportButton = { disabled: false, style: {} };
+  const csvButton = { disabled: false, style: {} };
 
   applyPhoneQuickActionState({
     documentRef: {
@@ -190,6 +241,9 @@ test('applyPhoneQuickActionState writes disabled states to phone quick action bu
   });
 
   assert.equal(analyzedVideoButton.disabled, true);
+  assert.equal(analyzedVideoButton.style.display, 'none');
   assert.equal(reportButton.disabled, false);
+  assert.equal(reportButton.style.display, 'inline-flex');
   assert.equal(csvButton.disabled, true);
+  assert.equal(csvButton.style.display, 'none');
 });

@@ -18,17 +18,18 @@ test('createVideoFileInput builds a file input configured for videos', () => {
   assert.equal(input.multiple, false);
 });
 
+test('createVideoFileInput throws when documentRef is unavailable', () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = undefined;
+  try {
+    assert.throws(() => createVideoFileInput(), /Document reference is required/);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
 test('triggerVideoFilePicker appends detached input and uses showPicker when available', () => {
   const appended = [];
-  const originalDocument = globalThis.document;
-  globalThis.document = {
-    body: {
-      appendChild(node) {
-        appended.push(node);
-      }
-    }
-  };
-
   const input = {
     isConnected: false,
     style: {},
@@ -39,18 +40,21 @@ test('triggerVideoFilePicker appends detached input and uses showPicker when ava
     }
   };
 
-  try {
-    const triggerMethod = triggerVideoFilePicker({
-      input,
-      logger: { warn() {} }
-    });
-    assert.equal(triggerMethod, 'showPicker');
-    assert.equal(appended.length, 1);
-    assert.equal(input.showPickerCalled, true);
-    assert.equal(input.value, '');
-  } finally {
-    globalThis.document = originalDocument;
-  }
+  const triggerMethod = triggerVideoFilePicker({
+    input,
+    documentRef: {
+      body: {
+        appendChild(node) {
+          appended.push(node);
+        }
+      }
+    },
+    logger: { warn() {} }
+  });
+  assert.equal(triggerMethod, 'showPicker');
+  assert.equal(appended.length, 1);
+  assert.equal(input.showPickerCalled, true);
+  assert.equal(input.value, '');
 });
 
 test('triggerVideoFilePicker falls back to click when showPicker fails', () => {
@@ -256,6 +260,161 @@ test('waitForVideoLoad rejects invalid inputs', async () => {
     src: '',
     logger: { log() {}, warn() {}, error() {} }
   }));
+});
+
+test('waitForVideoLoad rejects invalid timeout', async () => {
+  await assert.rejects(() => waitForVideoLoad({
+    videoElement: {
+      readyState: 0,
+      videoWidth: 0,
+      videoHeight: 0,
+      duration: Number.NaN,
+      addEventListener() {},
+      removeEventListener() {},
+      load() {},
+      removeAttribute() {},
+      src: ''
+    },
+    src: 'blob:video',
+    timeoutMs: 0,
+    logger: { log() {}, warn() {}, error() {} }
+  }), /Invalid timeout/);
+});
+
+test('waitForVideoLoad timeout log includes configured timeout seconds', async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let timeoutFn = null;
+  const logs = [];
+  globalThis.setTimeout = (fn) => {
+    timeoutFn = fn;
+    return 1;
+  };
+  globalThis.clearTimeout = () => {};
+  globalThis.setInterval = () => 2;
+  globalThis.clearInterval = () => {};
+
+  try {
+    const pending = waitForVideoLoad({
+      videoElement: {
+        readyState: 0,
+        videoWidth: 0,
+        videoHeight: 0,
+        duration: Number.NaN,
+        addEventListener() {},
+        removeEventListener() {},
+        load() {},
+        removeAttribute() {},
+        src: ''
+      },
+      src: 'blob:video',
+      timeoutMs: 12000,
+      logger: { log() {}, warn() {}, error(message) { logs.push(message); } }
+    });
+
+    timeoutFn();
+    await assert.rejects(() => pending, /Timeout/);
+    assert.match(logs[0], /12 seconds/);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('waitForVideoLoad timeout cleans up listeners', async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let timeoutFn = null;
+  const removed = [];
+  globalThis.setTimeout = (fn) => {
+    timeoutFn = fn;
+    return 1;
+  };
+  globalThis.clearTimeout = () => {};
+  globalThis.setInterval = () => 2;
+  globalThis.clearInterval = () => {};
+
+  try {
+    const pending = waitForVideoLoad({
+      videoElement: {
+        readyState: 0,
+        videoWidth: 0,
+        videoHeight: 0,
+        duration: Number.NaN,
+        addEventListener() {},
+        removeEventListener(name) {
+          removed.push(name);
+        },
+        load() {},
+        removeAttribute() {},
+        src: ''
+      },
+      src: 'blob:video',
+      timeoutMs: 4000,
+      logger: { log() {}, warn() {}, error() {} }
+    });
+
+    timeoutFn();
+    await assert.rejects(() => pending, /Timeout/);
+    assert.ok(removed.includes('loadedmetadata'));
+    assert.ok(removed.includes('error'));
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('waitForVideoLoad handles elements without addEventListener/removeEventListener', async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const intervals = [];
+  globalThis.setTimeout = () => 1;
+  globalThis.clearTimeout = () => {};
+  globalThis.setInterval = (fn) => {
+    intervals.push(fn);
+    return 2;
+  };
+  globalThis.clearInterval = () => {};
+
+  try {
+    const videoElement = {
+      readyState: 0,
+      videoWidth: 0,
+      videoHeight: 0,
+      duration: Number.NaN,
+      load() {},
+      removeAttribute() {},
+      src: '',
+      loop: true
+    };
+
+    const pending = waitForVideoLoad({
+      videoElement,
+      src: 'blob:no-events',
+      timeoutMs: 2000,
+      logger: { log() {}, warn() {}, error() {} }
+    });
+
+    videoElement.readyState = 2;
+    videoElement.duration = 1;
+    intervals[0]();
+    await pending;
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
 });
 
 test('startVideoPlaybackForAnalysis resets playback and stamps the epoch base', async () => {
