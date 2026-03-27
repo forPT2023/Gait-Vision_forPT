@@ -106,17 +106,61 @@ export function shouldRestartCameraForOrientationChange({
 
 export function waitForVideoMetadataAndPlay({ videoElement, timeoutMs = 5000 }) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Timeout')), timeoutMs);
-    videoElement.onloadedmetadata = async () => {
+    if (!videoElement || typeof videoElement.play !== 'function') {
+      reject(new Error('Invalid video element'));
+      return;
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      reject(new Error('Invalid timeout'));
+      return;
+    }
+
+    if (videoElement?.readyState >= 1) {
+      videoElement.play().then(resolve).catch(reject);
+      return;
+    }
+
+    let settled = false;
+    const onLoadedMetadata = async () => {
+      if (settled) return;
       try {
         await videoElement.play();
-        clearTimeout(timeout);
-        resolve();
+        settled = true;
+        cleanup();
+        resolve(undefined);
       } catch (error) {
-        clearTimeout(timeout);
+        settled = true;
+        cleanup();
         reject(error);
       }
     };
+
+    const onTimeout = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Timeout'));
+    };
+
+    const timeout = setTimeout(onTimeout, timeoutMs);
+    let assignedHandler = false;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      if (typeof videoElement?.removeEventListener === 'function') {
+        videoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
+        return;
+      }
+      if (assignedHandler && videoElement) {
+        videoElement.onloadedmetadata = null;
+      }
+    };
+
+    if (typeof videoElement?.addEventListener === 'function') {
+      videoElement.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+    } else if (videoElement) {
+      assignedHandler = true;
+      videoElement.onloadedmetadata = onLoadedMetadata;
+    }
   });
 }
 
@@ -128,11 +172,26 @@ export async function startCameraStreamWithFallbacks({
   logger = console,
   timeoutMs = 5000
 }) {
+  if (!mediaDevices?.getUserMedia) {
+    throw new Error('MediaDevices.getUserMedia is unavailable');
+  }
+  if (!videoElement) {
+    throw new Error('Video element is required');
+  }
+  if (!Array.isArray(constraints) || constraints.length === 0) {
+    throw new Error('At least one camera constraint is required');
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('Invalid timeout');
+  }
+
   let lastError = null;
 
   for (const constraint of constraints) {
+    let acquiredStream = null;
     try {
       const mediaStream = await mediaDevices.getUserMedia(constraint);
+      acquiredStream = mediaStream;
       videoElement.srcObject = mediaStream;
       await waitForVideoMetadataAndPlayFn({
         videoElement,
@@ -140,6 +199,12 @@ export async function startCameraStreamWithFallbacks({
       });
       return mediaStream;
     } catch (error) {
+      if (acquiredStream?.getTracks) {
+        stopMediaStream(acquiredStream);
+      }
+      if (videoElement?.srcObject === acquiredStream) {
+        videoElement.srcObject = null;
+      }
       lastError = error;
       logger.log?.('Constraint failed:', error);
     }

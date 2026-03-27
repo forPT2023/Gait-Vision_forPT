@@ -16,9 +16,9 @@ function requestToPromise(request) {
 }
 
 export function createSessionStorage({
-  indexedDBRef = indexedDB,
-  cryptoRef = crypto,
-  navigatorRef = navigator,
+  indexedDBRef = globalThis.indexedDB,
+  cryptoRef = globalThis.crypto,
+  navigatorRef = globalThis.navigator,
   createError = defaultCreateError,
   now = () => Date.now(),
   logger = console
@@ -27,6 +27,9 @@ export function createSessionStorage({
   let encryptionKey = null;
 
   async function initDatabase() {
+    if (!indexedDBRef?.open) {
+      throw createError('INDEXEDDB_UNAVAILABLE', 'IndexedDB is not available in this environment');
+    }
     if (db) return db;
 
     db = await new Promise((resolve, reject) => {
@@ -50,6 +53,9 @@ export function createSessionStorage({
   async function getOrCreateEncryptionKey() {
     const database = await initDatabase();
     if (encryptionKey) return encryptionKey;
+    if (!cryptoRef?.subtle) {
+      throw createError('CRYPTO_UNAVAILABLE', 'Web Crypto API is not available in this environment');
+    }
 
     return new Promise((resolve, reject) => {
       const tx = database.transaction(['meta'], 'readwrite');
@@ -83,9 +89,13 @@ export function createSessionStorage({
       const database = await initDatabase();
       if (navigatorRef.storage?.estimate) {
         const estimate = await navigatorRef.storage.estimate();
-        const percentUsed = (estimate.usage / estimate.quota) * 100;
-        if (percentUsed > 80) {
-          onStorageWarning?.(percentUsed);
+        const usage = Number(estimate?.usage);
+        const quota = Number(estimate?.quota);
+        if (Number.isFinite(usage) && Number.isFinite(quota) && quota > 0) {
+          const percentUsed = (usage / quota) * 100;
+          if (percentUsed > 80) {
+            onStorageWarning?.(percentUsed);
+          }
         }
       }
 

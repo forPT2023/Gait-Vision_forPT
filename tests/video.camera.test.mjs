@@ -106,6 +106,34 @@ test('waitForVideoMetadataAndPlay resolves after play succeeds', async () => {
   }
 });
 
+test('waitForVideoMetadataAndPlay rejects invalid video element', async () => {
+  await assert.rejects(
+    waitForVideoMetadataAndPlay({ videoElement: null }),
+    /Invalid video element/
+  );
+});
+
+test('waitForVideoMetadataAndPlay rejects invalid timeout', async () => {
+  await assert.rejects(
+    waitForVideoMetadataAndPlay({
+      videoElement: { async play() {} },
+      timeoutMs: 0
+    }),
+    /Invalid timeout/
+  );
+});
+
+test('waitForVideoMetadataAndPlay resolves immediately when metadata is already available', async () => {
+  let played = false;
+  await waitForVideoMetadataAndPlay({
+    videoElement: {
+      readyState: 2,
+      async play() { played = true; }
+    }
+  });
+  assert.equal(played, true);
+});
+
 test('startCameraStreamWithFallbacks retries constraints until one succeeds', async () => {
   const calls = [];
   const stream = { id: 'stream-1' };
@@ -128,6 +156,106 @@ test('startCameraStreamWithFallbacks retries constraints until one succeeds', as
   assert.equal(result, stream);
   assert.equal(videoElement.srcObject, stream);
   assert.equal(calls.length, 2);
+});
+
+test('startCameraStreamWithFallbacks validates required inputs', async () => {
+  await assert.rejects(
+    startCameraStreamWithFallbacks({
+      mediaDevices: null,
+      videoElement: {},
+      constraints: [{ video: true }]
+    }),
+    /MediaDevices\.getUserMedia is unavailable/
+  );
+
+  await assert.rejects(
+    startCameraStreamWithFallbacks({
+      mediaDevices: { async getUserMedia() {} },
+      videoElement: null,
+      constraints: [{ video: true }]
+    }),
+    /Video element is required/
+  );
+
+  await assert.rejects(
+    startCameraStreamWithFallbacks({
+      mediaDevices: { async getUserMedia() {} },
+      videoElement: {},
+      constraints: []
+    }),
+    /At least one camera constraint is required/
+  );
+
+  await assert.rejects(
+    startCameraStreamWithFallbacks({
+      mediaDevices: { async getUserMedia() {} },
+      videoElement: {},
+      constraints: [{ video: true }],
+      timeoutMs: 0
+    }),
+    /Invalid timeout/
+  );
+});
+
+test('startCameraStreamWithFallbacks stops failed stream before retrying constraints', async () => {
+  const stopped = [];
+  const firstStream = {
+    getTracks() {
+      return [{ stop() { stopped.push('first'); } }];
+    }
+  };
+  const secondStream = { id: 'stream-2' };
+  const videoElement = { srcObject: null };
+  let callCount = 0;
+
+  const result = await startCameraStreamWithFallbacks({
+    mediaDevices: {
+      async getUserMedia() {
+        callCount += 1;
+        return callCount === 1 ? firstStream : secondStream;
+      }
+    },
+    videoElement,
+    constraints: [{ video: { width: 1 } }, { video: { width: 2 } }],
+    waitForVideoMetadataAndPlayFn: async ({ videoElement: targetVideoElement }) => {
+      if (targetVideoElement.srcObject === firstStream) {
+        throw new Error('play failed');
+      }
+    },
+    logger: { log() {} }
+  });
+
+  assert.equal(result, secondStream);
+  assert.deepEqual(stopped, ['first']);
+  assert.equal(videoElement.srcObject, secondStream);
+});
+
+test('startCameraStreamWithFallbacks does not stop an unrelated existing stream when getUserMedia fails early', async () => {
+  const stopped = [];
+  const existingStream = {
+    getTracks() {
+      return [{ stop() { stopped.push('existing'); } }];
+    }
+  };
+  const videoElement = { srcObject: existingStream };
+
+  await assert.rejects(
+    startCameraStreamWithFallbacks({
+      mediaDevices: {
+        async getUserMedia() {
+          throw new Error('permission denied');
+        }
+      },
+      videoElement,
+      constraints: [{ video: true }],
+      waitForVideoMetadataAndPlayFn: async () => {},
+      logger: { log() {} }
+    }),
+    /permission denied/
+  );
+
+  assert.deepEqual(stopped, []);
+  assert.equal(videoElement.srcObject, existingStream);
 });
 
 test('releaseCameraResources clears stream, canvas, preview loop, and ui state', () => {

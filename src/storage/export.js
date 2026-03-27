@@ -2,33 +2,54 @@ import { APP_VERSION_LABEL } from '../config/app.js';
 
 const ANALYSIS_CSV_HEADER = 'elapsed_ms,speed_m_s,cadence_spm,symmetry_pct,trunk_deg,pelvis_deg,left_knee_deg,right_knee_deg,left_hip_deg,right_hip_deg,left_ankle_deg,right_ankle_deg';
 
-function formatAnalysisCsvRow(dataPoint) {
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function formatFixed(value, digits) {
+  return toFiniteNumber(value).toFixed(digits);
+}
+
+function sanitizeFilenameSegment(value, { fallback = 'unknown' } = {}) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return fallback;
+  const sanitized = normalized
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^\.+|\.+$/g, '');
+  return sanitized || fallback;
+}
+
+function formatAnalysisCsvRow(dataPoint = {}) {
   return [
-    Math.round(dataPoint.elapsedMs ?? dataPoint.timestamp ?? 0),
-    dataPoint.speed.toFixed(3),
-    dataPoint.cadence.toFixed(1),
-    dataPoint.symmetry.toFixed(1),
-    dataPoint.trunk.toFixed(2),
-    dataPoint.pelvis.toFixed(2),
-    dataPoint.leftKnee.toFixed(2),
-    dataPoint.rightKnee.toFixed(2),
-    dataPoint.leftHip.toFixed(2),
-    dataPoint.rightHip.toFixed(2),
-    dataPoint.leftAnkle.toFixed(2),
-    dataPoint.rightAnkle.toFixed(2)
+    Math.round(toFiniteNumber(dataPoint.elapsedMs ?? dataPoint.timestamp ?? 0)),
+    formatFixed(dataPoint.speed, 3),
+    formatFixed(dataPoint.cadence, 1),
+    formatFixed(dataPoint.symmetry, 1),
+    formatFixed(dataPoint.trunk, 2),
+    formatFixed(dataPoint.pelvis, 2),
+    formatFixed(dataPoint.leftKnee, 2),
+    formatFixed(dataPoint.rightKnee, 2),
+    formatFixed(dataPoint.leftHip, 2),
+    formatFixed(dataPoint.rightHip, 2),
+    formatFixed(dataPoint.leftAnkle, 2),
+    formatFixed(dataPoint.rightAnkle, 2)
   ].join(',');
 }
 
 export function buildSessionExport({
-  sessions,
+  sessions = [],
   exportDate = new Date().toISOString(),
   version = APP_VERSION_LABEL
 }) {
+  const normalizedSessions = Array.isArray(sessions) ? sessions : [];
   return {
     exportDate,
     version,
-    totalSessions: sessions.length,
-    sessions
+    totalSessions: normalizedSessions.length,
+    sessions: normalizedSessions
   };
 }
 
@@ -41,40 +62,74 @@ export function createBackupFilename({ date = new Date() } = {}) {
 }
 
 export function buildCsvExportFilename({ patientId, date = new Date() }) {
-  return `gait_${patientId}_${formatCompactDate({ date })}.csv`;
+  return `gait_${sanitizeFilenameSegment(patientId)}_${formatCompactDate({ date })}.csv`;
 }
 
 export function buildPdfReportFilename({ patientId, date = new Date() }) {
-  return `gait_report_${patientId}_${formatCompactDate({ date })}.pdf`;
+  return `gait_report_${sanitizeFilenameSegment(patientId)}_${formatCompactDate({ date })}.pdf`;
 }
 
 export function buildAnalysisCsv(analysisData, { bom = '\uFEFF' } = {}) {
-  const rows = analysisData.map(formatAnalysisCsvRow);
+  const rows = Array.isArray(analysisData)
+    ? analysisData.map(formatAnalysisCsvRow)
+    : [];
   return `${bom}${ANALYSIS_CSV_HEADER}\n${rows.join('\n')}${rows.length ? '\n' : ''}`;
 }
 
 export function downloadBlobFile({
   blob,
   filename,
-  URLRef = URL,
-  documentRef = document,
+  URLRef = globalThis.URL,
+  documentRef = globalThis.document,
   revokeDelayMs = 0
 }) {
+  if (!URLRef?.createObjectURL || !URLRef?.revokeObjectURL) {
+    throw new Error('URL API is unavailable');
+  }
+  if (!documentRef?.createElement) {
+    throw new Error('Document API is unavailable');
+  }
+  if (blob == null) {
+    throw new Error('Blob payload is required');
+  }
+  const normalizedFilename = String(filename ?? '').trim();
+  if (!normalizedFilename) {
+    throw new Error('Filename is required');
+  }
   const url = URLRef.createObjectURL(blob);
   const link = documentRef.createElement('a');
   link.href = url;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URLRef.revokeObjectURL(url), revokeDelayMs);
+  link.download = normalizedFilename;
+  let appended = false;
+  let cleanupParent = null;
+  if (!link.isConnected && documentRef.body?.appendChild) {
+    documentRef.body.appendChild(link);
+    appended = true;
+    cleanupParent = documentRef.body;
+  }
+  try {
+    link.click();
+  } finally {
+    if (appended && cleanupParent?.removeChild) {
+      cleanupParent.removeChild(link);
+    } else if (appended && link.parentNode?.removeChild) {
+      link.parentNode.removeChild(link);
+    }
+    setTimeout(() => URLRef.revokeObjectURL(url), revokeDelayMs);
+  }
 }
 
 export function downloadJson({
-  documentRef = document,
-  URLRef = URL,
+  documentRef = globalThis.document,
+  URLRef = globalThis.URL,
+  BlobRef = globalThis.Blob,
   payload,
-  filename
+  filename = 'export.json'
 }) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  if (typeof BlobRef !== 'function') {
+    throw new Error('Blob API is unavailable');
+  }
+  const blob = new BlobRef([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   downloadBlobFile({
     blob,
     filename,

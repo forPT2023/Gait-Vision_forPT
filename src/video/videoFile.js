@@ -1,4 +1,7 @@
-export function createVideoFileInput({ documentRef = document, accept = 'video/*' } = {}) {
+export function createVideoFileInput({ documentRef = globalThis.document, accept = 'video/*' } = {}) {
+  if (!documentRef?.createElement) {
+    throw new Error('Document reference is required to create a file input');
+  }
   const input = documentRef.createElement('input');
   input.type = 'file';
   input.accept = accept;
@@ -8,20 +11,21 @@ export function createVideoFileInput({ documentRef = document, accept = 'video/*
 
 export function triggerVideoFilePicker({
   input,
+  documentRef = globalThis.document,
   logger = console
 } = {}) {
   if (!input) {
     throw new Error('Video file input is required');
   }
 
-  if (!input.isConnected && document?.body) {
+  if (!input.isConnected && documentRef?.body) {
     input.style.position = 'fixed';
     input.style.left = '-9999px';
     input.style.width = '1px';
     input.style.height = '1px';
     input.style.opacity = '0';
     input.style.pointerEvents = 'none';
-    document.body.appendChild(input);
+    documentRef.body.appendChild(input);
   }
 
   input.value = '';
@@ -59,15 +63,23 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
       reject(new Error('Invalid video source'));
       return;
     }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      reject(new Error('Invalid timeout'));
+      return;
+    }
 
+    let settled = false;
     const timeout = setTimeout(() => {
-      logger.error('[Video] ❌ Load timeout after 30 seconds');
+      if (settled) return;
+      settled = true;
+      const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+      logger.error(`[Video] ❌ Load timeout after ${timeoutSeconds} seconds`);
       if (pollInterval) clearInterval(pollInterval);
+      cleanup();
       reject(new Error('Timeout'));
     }, timeoutMs);
 
     let pollInterval = null;
-    let resolved = false;
     const hasRenderableFrame = () => {
       const hasDimensions = videoElement.videoWidth > 0 && videoElement.videoHeight > 0;
       const hasDecodedFrame = videoElement.readyState >= 2;
@@ -76,14 +88,14 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     };
 
     const done = (eventName) => {
-      if (resolved) {
+      if (settled) {
         logger.log('[Video] Event', eventName, 'fired but already resolved');
         return;
       }
 
       logger.log('[Video] Event fired:', eventName, '| readyState:', videoElement.readyState, '| dimensions:', videoElement.videoWidth, 'x', videoElement.videoHeight, '| duration:', videoElement.duration);
       if (hasRenderableFrame()) {
-        resolved = true;
+        settled = true;
         clearTimeout(timeout);
         if (pollInterval) clearInterval(pollInterval);
         cleanup();
@@ -95,6 +107,8 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     };
 
     const onError = (error) => {
+      if (settled) return;
+      settled = true;
       const mediaError = videoElement.error;
       logger.error('[Video] ❌ Load error:', error, mediaError);
       clearTimeout(timeout);
@@ -104,11 +118,11 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     };
 
     const cleanup = () => {
-      videoElement.removeEventListener('loadedmetadata', doneMetadata);
-      videoElement.removeEventListener('loadeddata', doneData);
-      videoElement.removeEventListener('canplay', doneCanplay);
-      videoElement.removeEventListener('canplaythrough', doneCanplaythrough);
-      videoElement.removeEventListener('error', onError);
+      videoElement.removeEventListener?.('loadedmetadata', doneMetadata);
+      videoElement.removeEventListener?.('loadeddata', doneData);
+      videoElement.removeEventListener?.('canplay', doneCanplay);
+      videoElement.removeEventListener?.('canplaythrough', doneCanplaythrough);
+      videoElement.removeEventListener?.('error', onError);
     };
 
     const doneMetadata = () => done('loadedmetadata');
@@ -116,11 +130,11 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     const doneCanplay = () => done('canplay');
     const doneCanplaythrough = () => done('canplaythrough');
 
-    videoElement.addEventListener('loadedmetadata', doneMetadata);
-    videoElement.addEventListener('loadeddata', doneData);
-    videoElement.addEventListener('canplay', doneCanplay);
-    videoElement.addEventListener('canplaythrough', doneCanplaythrough);
-    videoElement.addEventListener('error', onError);
+    videoElement.addEventListener?.('loadedmetadata', doneMetadata);
+    videoElement.addEventListener?.('loadeddata', doneData);
+    videoElement.addEventListener?.('canplay', doneCanplay);
+    videoElement.addEventListener?.('canplaythrough', doneCanplaythrough);
+    videoElement.addEventListener?.('error', onError);
 
     if (videoElement.src) {
       videoElement.removeAttribute?.('src');
@@ -139,7 +153,7 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     }
 
     pollInterval = setInterval(() => {
-      if (resolved) return;
+      if (settled) return;
       if (hasRenderableFrame()) {
         done('polling-ready');
       }
