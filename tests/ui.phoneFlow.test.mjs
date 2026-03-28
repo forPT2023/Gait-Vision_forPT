@@ -37,7 +37,7 @@ test('getPhoneFlowState exposes capture, analyzing, and results states for phone
   }), {
     visible: true,
     view: 'capture',
-    captureSurfaceVisible: false,
+    captureSurfaceVisible: true,
     stageLabel: '取得',
     metaLabel: '',
     showMeta: false,

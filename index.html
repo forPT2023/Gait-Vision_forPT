@@ -89,6 +89,14 @@
     body[data-device-mode="phone"][data-phone-capture-surface="hidden"] #canvas-container { display: none !important; }
     #phone-capture-hint { display: none; margin: 0.45rem 0.75rem 0; padding: 0.7rem 0.85rem; border-radius: 0.75rem; border: 1px dashed #475569; background: rgba(15, 23, 42, 0.8); color: #cbd5e1; font-size: 0.8rem; line-height: 1.45; }
     body[data-device-mode="phone"][data-phone-capture-surface="hidden"] #phone-capture-hint { display: block; }
+    #phone-video-preview-stack { margin: 0.45rem 0.75rem 0; padding: 0.85rem; border-radius: 0.85rem; border: 1px solid #334155; background: rgba(15, 23, 42, 0.88); display: none; }
+    body[data-device-mode="phone"] #phone-video-preview-stack { display: block; }
+    .phone-preview-card { background: #0f172a; border: 1px solid #334155; border-radius: 0.8rem; padding: 0.65rem; margin-bottom: 0.7rem; }
+    .phone-preview-card:last-child { margin-bottom: 0; }
+    .phone-preview-card h3 { font-size: 0.8rem; color: #cbd5e1; margin-bottom: 0.45rem; font-weight: 700; }
+    .phone-preview-card p { font-size: 0.72rem; color: #94a3b8; margin-bottom: 0.45rem; line-height: 1.35; }
+    .phone-preview-card video { width: 100%; border-radius: 0.6rem; border: 1px solid #475569; background: #020617; max-height: 240px; object-fit: contain; }
+    .phone-preview-card .phone-preview-empty { display: block; padding: 0.7rem; border-radius: 0.6rem; border: 1px dashed #475569; color: #94a3b8; font-size: 0.73rem; text-align: center; }
     #charts-container { background: #0f1419; overflow: auto; padding: 1rem; border: 1px solid #1e293b; border-radius: 1rem; }
     .chart-wrapper { background: #1a1f2e; border-radius: 0.75rem; padding: 1rem; margin-bottom: 1rem; border: 1px solid #2d3748; }
     .chart-wrapper:last-child { margin-bottom: 0; }
@@ -128,7 +136,14 @@
       body[data-device-mode="phone"] header h1 { font-size: 1.05rem !important; }
       body[data-device-mode="phone"] header > div { gap: 0.4rem !important; }
       body[data-device-mode="phone"] #control-bar { display: none !important; }
+      body[data-device-mode="phone"] #main-layout { overflow-y: visible; }
     }
+    body[data-device-mode="phone"] { overflow-y: auto; overflow-x: hidden; }
+    body[data-device-mode="phone"] #main-app { overflow-y: auto; overflow-x: hidden; }
+    body[data-device-mode="phone"] #main-layout { overflow-y: visible; height: auto; }
+    body[data-device-mode="phone"] #canvas-container { min-height: 260px; flex: 0 0 auto; }
+    body[data-device-mode="phone"] #charts-container { overflow: visible; display: block; }
+    body[data-device-mode="phone"] .chart-wrapper { min-width: 0; margin-bottom: 0.75rem; }
     @media (max-width: 640px) and (orientation: portrait) {
       header h1 { font-size: 1.05rem !important; }
       #canvas-container { flex-basis: min(84dvh, 76%); min-height: min(84dvh, 660px); }
@@ -319,7 +334,22 @@
         </div>
       </div>
     </div>
-    <div id="phone-capture-hint">スマホ版ではプレビュー表示を省略しています。<br>「撮影する」または「動画を選択」→「解析開始」を実行してください。</div>
+    <div id="phone-capture-hint">動画を選択すると「元動画プレビュー」に表示されます。解析完了後は「解析プレビュー」も確認できます。</div>
+
+    <div id="phone-video-preview-stack">
+      <div class="phone-preview-card phone-capture-only">
+        <h3>🎬 元動画プレビュー</h3>
+        <p>読み込んだ動画ファイルをここで確認できます。</p>
+        <video id="phone-original-preview" controls playsinline webkit-playsinline preload="metadata"></video>
+        <span id="phone-original-preview-empty" class="phone-preview-empty">動画未選択です。上の「動画を撮影 / アップロード」から読み込んでください。</span>
+      </div>
+      <div class="phone-preview-card phone-results-only">
+        <h3>✨ 解析プレビュー（マーカー重畳）</h3>
+        <p>解析終了後に自動生成されるプレビュー動画です。スクロールしながら結果を確認できます。</p>
+        <video id="phone-analyzed-preview" controls playsinline webkit-playsinline preload="metadata"></video>
+        <span id="phone-analyzed-preview-empty" class="phone-preview-empty">解析後のプレビュー動画はまだありません。解析を開始してください。</span>
+      </div>
+    </div>
 
     <div id="main-layout">
       <div id="canvas-container">
@@ -516,6 +546,11 @@
 
     // Phase 3: Video file and recording
     let videoFileUrl = null;
+    let originalPreviewUrl = null;
+    let analyzedPreviewUrl = null;
+    let analyzedPreviewBlob = null;
+    let analyzedPreviewMimeType = '';
+    let isGeneratingAnalyzedPreview = false;
     let videoEpochBaseMs = null; // For Chart.js realtime x-axis in video mode
     let videoFrameCallbackHandle = null; // requestVideoFrameCallback handle (video mode)
     let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -591,6 +626,61 @@
       videoFrameCallbackHandle = nextState.videoFrameCallbackHandle;
       videoFileUrl = nextState.videoFileUrl;
       videoEpochBaseMs = nextState.videoEpochBaseMs;
+    }
+
+    function revokePreviewUrl(url) {
+      if (!url) return null;
+      try {
+        URL.revokeObjectURL(url);
+      } catch (_) {
+        // ignore preview URL revoke failures
+      }
+      return null;
+    }
+
+    function clearAnalyzedPreviewState() {
+      analyzedPreviewUrl = revokePreviewUrl(analyzedPreviewUrl);
+      analyzedPreviewBlob = null;
+      analyzedPreviewMimeType = '';
+    }
+
+    function syncPhoneVideoPreviews() {
+      const originalPreview = document.getElementById('phone-original-preview');
+      const originalEmpty = document.getElementById('phone-original-preview-empty');
+      const analyzedPreview = document.getElementById('phone-analyzed-preview');
+      const analyzedEmpty = document.getElementById('phone-analyzed-preview-empty');
+
+      if (originalPreview) {
+        const hasOriginal = Boolean(originalPreviewUrl);
+        if (hasOriginal && originalPreview.src !== originalPreviewUrl) {
+          originalPreview.src = originalPreviewUrl;
+          originalPreview.load();
+        }
+        if (!hasOriginal && originalPreview.src) {
+          originalPreview.removeAttribute('src');
+          originalPreview.load();
+        }
+        if (originalEmpty) {
+          originalEmpty.style.display = hasOriginal ? 'none' : 'block';
+        }
+        originalPreview.style.display = hasOriginal ? 'block' : 'none';
+      }
+
+      if (analyzedPreview) {
+        const hasAnalyzed = Boolean(analyzedPreviewUrl);
+        if (hasAnalyzed && analyzedPreview.src !== analyzedPreviewUrl) {
+          analyzedPreview.src = analyzedPreviewUrl;
+          analyzedPreview.load();
+        }
+        if (!hasAnalyzed && analyzedPreview.src) {
+          analyzedPreview.removeAttribute('src');
+          analyzedPreview.load();
+        }
+        if (analyzedEmpty) {
+          analyzedEmpty.style.display = hasAnalyzed ? 'none' : 'block';
+        }
+        analyzedPreview.style.display = hasAnalyzed ? 'block' : 'none';
+      }
     }
 
     function getAnalysisSourceMode() {
@@ -747,6 +837,8 @@
     function prepareForNewCaptureSession({ resetCharts = false } = {}) {
       phoneFlowView = 'capture';
       resetAnalysisOutputButtons();
+      clearAnalyzedPreviewState();
+      syncPhoneVideoPreviews();
       if (resetCharts) {
         chartController.resetCharts();
       }
@@ -786,18 +878,20 @@
       if (!stagePanel) return;
       stagePanel.classList.toggle('hidden-panel', deviceMode !== 'phone');
 
-      if (videoButton) videoButton.disabled = isAnalyzing || isRecording || isLoadingVideo;
+      if (videoButton) videoButton.disabled = isAnalyzing || isRecording || isLoadingVideo || isGeneratingAnalyzedPreview;
       if (analyzeButton) {
         const sourceMode = getAnalysisSourceMode();
         const hasSource = sourceMode === 'video'
           ? Boolean(videoFileUrl)
           : Boolean(videoElement.srcObject);
-        const canStart = !isAnalyzing && !isLoadingVideo && hasSource;
+        const canStart = !isAnalyzing && !isLoadingVideo && !isGeneratingAnalyzedPreview && hasSource;
         const canStop = isAnalyzing;
         analyzeButton.disabled = !(canStart || canStop);
-        analyzeButton.textContent = canStop ? '⏹ 解析停止' : '▶️ 解析開始';
+        analyzeButton.textContent = isGeneratingAnalyzedPreview
+          ? '⏳ 解析プレビュー生成中'
+          : (canStop ? '⏹ 解析停止' : '▶️ 解析開始');
       }
-      if (saveButton) saveButton.disabled = state.analyzedVideoDisabled;
+      if (saveButton) saveButton.disabled = state.analyzedVideoDisabled || isGeneratingAnalyzedPreview;
       if (reportButton) reportButton.disabled = state.reportDisabled;
       if (csvButton) csvButton.disabled = state.csvDisabled;
     }
@@ -824,6 +918,7 @@
         documentRef: document,
         state: phoneFlowState
       });
+      syncPhoneVideoPreviews();
       syncPhoneQuickActions();
       return applyDeviceModeUi({
         documentRef: document,
@@ -1273,6 +1368,7 @@
         cleanupInput();
 
         isLoadingVideo = true;
+        syncPhoneStageActions();
         console.log('[Video] Starting load process for:', file.name);
 
         try {
@@ -1305,6 +1401,10 @@
 
           // Create new video URL
           videoFileUrl = URL.createObjectURL(file);
+          originalPreviewUrl = revokePreviewUrl(originalPreviewUrl);
+          originalPreviewUrl = videoFileUrl;
+          clearAnalyzedPreviewState();
+          syncPhoneVideoPreviews();
           videoEpochBaseMs = null;
           console.log('[Video] Object URL created:', videoFileUrl.substring(0, 50) + '...');
 
@@ -1332,7 +1432,13 @@
               // Enable save analyzed video button after analysis completes
               if (videoFileUrl && analysisData.length > 0) {
                 document.getElementById('btn-save-analyzed-video').disabled = false;
-                showNotification('解析完了！解析動画を保存できます', 'success');
+                showNotification('解析完了！解析プレビューを準備しています…', 'success');
+                try {
+                  await ensureAnalyzedPreviewReady({ notify: false });
+                  showNotification('解析プレビューの準備ができました', 'success');
+                } catch (previewError) {
+                  console.warn('[Preview] Auto build skipped:', previewError);
+                }
               }
             }
           };
@@ -1373,6 +1479,9 @@
           }
 
           clearLoadedVideoState();
+          originalPreviewUrl = null;
+          clearAnalyzedPreviewState();
+          syncPhoneVideoPreviews();
 
           const recordBtn = document.getElementById('btn-record');
           setRecordButtonForVideoMode(recordBtn, { disabled: true });
@@ -1854,31 +1963,32 @@
       showNotification('録画を破棄しました', 'info');
     }
 
-    // Save analyzed video (for video file mode)
-    async function saveAnalyzedVideo() {
+    async function renderAnalyzedVideoBlob({ showStartMessage = true } = {}) {
       if (!videoFileUrl) {
-        showNotification('動画ファイルがありません', 'error');
-        return;
+        throw createAppError('NO_VIDEO_FILE', '動画ファイルがありません');
+      }
+      if (analysisData.length === 0) {
+        throw createAppError('NO_ANALYSIS_DATA', '解析データがありません。まず動画を解析してください。');
+      }
+      if (isGeneratingAnalyzedPreview) {
+        throw createAppError('ANALYZED_PREVIEW_BUSY', '解析プレビューを生成中です。完了をお待ちください。');
       }
 
-      if (analysisData.length === 0) {
-        showNotification('解析データがありません。まず動画を解析してください。', 'error');
-        return;
+      isGeneratingAnalyzedPreview = true;
+      syncPhoneStageActions();
+
+      if (showStartMessage) {
+        showNotification('解析プレビューを生成中...', 'info');
       }
 
       try {
-        showNotification('解析動画を生成中...', 'info');
-
         if (isAnalyzing) {
           stopAllProcessing();
         }
 
         const previousTime = videoElement.currentTime || 0;
         const previousPaused = videoElement.paused;
-
-        // Get canvas stream for analyzed playback capture
         const stream = canvasElement.captureStream(30);
-
         const chunks = [];
         const {
           mimeType,
@@ -1942,21 +2052,6 @@
           }
         };
 
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType });
-          downloadBlob({
-            blob,
-            filename: buildAnalyzedVideoFilename({
-              patientId,
-              mimeType
-            }),
-            URLRef: URL,
-            documentRef: document
-          });
-
-          showNotification('解析動画を保存しました', 'success');
-        };
-
         const endedHandler = async () => {
           await finishExport();
           videoElement.removeEventListener('ended', endedHandler);
@@ -1964,7 +2059,6 @@
 
         videoElement.addEventListener('ended', endedHandler);
 
-        // Reset video to beginning and replay with stored analysis overlay
         videoElement.currentTime = 0;
         videoElement.muted = true;
         renderAnalysisFrameFromData(findClosestAnalysisPoint(analysisData, 0));
@@ -1978,7 +2072,67 @@
           recorder.addEventListener('error', () => reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。')), { once: true });
         });
 
+        return {
+          blob: new Blob(chunks, { type: mimeType }),
+          mimeType
+        };
+      } finally {
+        isGeneratingAnalyzedPreview = false;
+        syncPhoneStageActions();
+      }
+    }
+
+    async function ensureAnalyzedPreviewReady({ notify = true } = {}) {
+      if (analyzedPreviewBlob && analyzedPreviewUrl) {
+        return {
+          blob: analyzedPreviewBlob,
+          mimeType: analyzedPreviewMimeType || analyzedPreviewBlob.type || 'video/webm'
+        };
+      }
+
+      const result = await renderAnalyzedVideoBlob({ showStartMessage: notify });
+      analyzedPreviewBlob = result.blob;
+      analyzedPreviewMimeType = result.mimeType;
+      analyzedPreviewUrl = revokePreviewUrl(analyzedPreviewUrl);
+      analyzedPreviewUrl = URL.createObjectURL(result.blob);
+      syncPhoneVideoPreviews();
+      return result;
+    }
+
+    // Save analyzed video (for video file mode)
+    async function saveAnalyzedVideo() {
+      if (!videoFileUrl) {
+        showNotification('動画ファイルがありません', 'error');
+        return;
+      }
+
+      if (analysisData.length === 0) {
+        showNotification('解析データがありません。まず動画を解析してください。', 'error');
+        return;
+      }
+
+      try {
+        const {
+          blob,
+          mimeType
+        } = await ensureAnalyzedPreviewReady({ notify: true });
+
+        downloadBlob({
+          blob,
+          filename: buildAnalyzedVideoFilename({
+            patientId,
+            mimeType
+          }),
+          URLRef: URL,
+          documentRef: document
+        });
+
+        showNotification('解析動画を保存しました', 'success');
       } catch (error) {
+        if (error?.code === 'ANALYZED_PREVIEW_BUSY') {
+          showNotification(error.message, 'warning');
+          return;
+        }
         console.error('[Save Analyzed Video] Error:', error);
         showNotification('解析動画の保存に失敗しました: ' + error.message, 'error');
       }
