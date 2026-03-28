@@ -1981,6 +1981,8 @@
         showNotification('解析プレビューを生成中...', 'info');
       }
 
+      let endedHandler = null;
+      let videoErrorHandler = null;
       try {
         if (isAnalyzing) {
           stopAllProcessing();
@@ -2001,13 +2003,14 @@
 
         let exportActive = false;
         let exportFrameHandle = null;
+        let exportFrameHandleUsesVideoCallback = false;
         let exportFinished = false;
 
         const cancelExportLoop = () => {
           exportFrameHandle = cancelScheduledHandle({
             handle: exportFrameHandle,
             videoElement,
-            preferVideoFrameCallback: !!videoElement.requestVideoFrameCallback,
+            preferVideoFrameCallback: exportFrameHandleUsesVideoCallback,
             cancelAnimationFrameFn: cancelAnimationFrame
           });
         };
@@ -2019,13 +2022,23 @@
           const dataPoint = findClosestAnalysisPoint(analysisData, elapsedMs);
           renderAnalysisFrameFromData(dataPoint);
 
-          if (!videoElement.ended && !videoElement.paused) {
-            exportFrameHandle = scheduleMediaWork({
-              videoElement,
-              callback: renderExportFrame,
-              requestAnimationFrameFn: requestAnimationFrame
-            });
+          if (videoElement.ended) {
+            return;
           }
+
+          if (videoElement.paused) {
+            // Keep polling while paused/buffering so export can resume on the next frame.
+            exportFrameHandleUsesVideoCallback = false;
+            exportFrameHandle = requestAnimationFrame(renderExportFrame);
+            return;
+          }
+
+          exportFrameHandleUsesVideoCallback = !!videoElement.requestVideoFrameCallback;
+          exportFrameHandle = scheduleMediaWork({
+            videoElement,
+            callback: renderExportFrame,
+            requestAnimationFrameFn: requestAnimationFrame
+          });
         };
 
         const finishExport = async () => {
@@ -2033,6 +2046,7 @@
           exportFinished = true;
           exportActive = false;
           cancelExportLoop();
+          exportFrameHandleUsesVideoCallback = false;
           if (recorder.state !== 'inactive') {
             recorder.stop();
           }
@@ -2042,7 +2056,9 @@
           const restorePoint = findClosestAnalysisPoint(analysisData, videoElement.currentTime * 1000);
           renderAnalysisFrameFromData(restorePoint);
           if (!previousPaused) {
-            videoElement.pause();
+            videoElement.play().catch(() => {
+              // Ignore autoplay policy errors when restoring preview playback state.
+            });
           }
         };
 
@@ -2052,31 +2068,93 @@
           }
         };
 
-        const endedHandler = async () => {
-          await finishExport();
-          videoElement.removeEventListener('ended', endedHandler);
+        let cleanupRecorderListeners = null;
+        const recorderStopPromise = new Promise((resolve, reject) => {
+          const onRecorderStop = () => {
+            cleanupRecorderListeners?.();
+            resolve();
+          };
+          const onRecorderError = () => {
+            cleanupRecorderListeners?.();
+            reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。'));
+          };
+
+          cleanupRecorderListeners = () => {
+            recorder.removeEventListener('stop', onRecorderStop);
+            recorder.removeEventListener('error', onRecorderError);
+          };
+
+          recorder.addEventListener('stop', onRecorderStop);
+          recorder.addEventListener('error', onRecorderError);
+        });
+
+        endedHandler = async () => {
+          try {
+            await finishExport();
+          } catch (error) {
+            console.warn('[Preview Export] finishExport on ended failed:', error);
+          } finally {
+            videoElement.removeEventListener('ended', endedHandler);
+          }
         };
 
         videoElement.addEventListener('ended', endedHandler);
+
+        const videoErrorPromise = new Promise((_, reject) => {
+          videoErrorHandler = () => {
+            reject(createAppError('ANALYZED_VIDEO_EXPORT_VIDEO_ERROR', '動画の再生中にエラーが発生しました。'));
+          };
+          videoElement.addEventListener('error', videoErrorHandler, { once: true });
+        });
 
         videoElement.currentTime = 0;
         videoElement.muted = true;
         renderAnalysisFrameFromData(findClosestAnalysisPoint(analysisData, 0));
         recorder.start();
         exportActive = true;
-        renderExportFrame();
 
-        await videoElement.play();
-        await new Promise((resolve, reject) => {
-          recorder.addEventListener('stop', resolve, { once: true });
-          recorder.addEventListener('error', () => reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。')), { once: true });
-        });
+        const hasKnownDuration = Number.isFinite(videoElement.duration) && videoElement.duration > 0;
+        const exportTimeoutMs = hasKnownDuration
+          ? Math.max(15000, Math.ceil(videoElement.duration * 2000 + 3000))
+          : 20000;
+
+        let exportTimeoutHandle = null;
+        try {
+          await videoElement.play();
+          // NOTE: start render loop only after playback actually starts.
+          // Starting while paused captures a single frame and can freeze analyzed output.
+          renderExportFrame();
+
+          await Promise.race([
+            recorderStopPromise,
+            videoErrorPromise,
+            new Promise((_, reject) => {
+              exportTimeoutHandle = setTimeout(() => {
+                reject(createAppError('ANALYZED_VIDEO_EXPORT_TIMEOUT', '解析動画の生成がタイムアウトしました。動画を短くして再実行してください。'));
+              }, exportTimeoutMs);
+            })
+          ]);
+        } catch (exportError) {
+          await finishExport();
+          throw exportError;
+        } finally {
+          if (exportTimeoutHandle) {
+            clearTimeout(exportTimeoutHandle);
+          }
+        }
 
         return {
           blob: new Blob(chunks, { type: mimeType }),
           mimeType
         };
       } finally {
+        if (typeof endedHandler === 'function') {
+          videoElement.removeEventListener('ended', endedHandler);
+        }
+        if (typeof videoErrorHandler === 'function') {
+          videoElement.removeEventListener('error', videoErrorHandler);
+        }
+        cleanupRecorderListeners?.();
         isGeneratingAnalyzedPreview = false;
         syncPhoneStageActions();
       }
