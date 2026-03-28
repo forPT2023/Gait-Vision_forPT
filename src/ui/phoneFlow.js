@@ -63,7 +63,7 @@ export function getPhoneFlowState({
   return {
     visible: true,
     view: normalizedView,
-    captureSurfaceVisible: false,
+    captureSurfaceVisible: true,
     stageLabel: '取得',
     metaLabel: hasAnalysisData
       ? `前回 点:${Math.max(0, analysisPoints)} 歩:${Math.max(0, stepCount)}`
