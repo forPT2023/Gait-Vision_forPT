@@ -138,8 +138,8 @@
       body[data-device-mode="phone"] #control-bar { display: none !important; }
       body[data-device-mode="phone"] #main-layout { overflow-y: visible; }
     }
-    body[data-device-mode="phone"] { overflow-y: auto; overflow-x: hidden; }
-    body[data-device-mode="phone"] #main-app { overflow-y: auto; overflow-x: hidden; }
+    body[data-device-mode="phone"] { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+    body[data-device-mode="phone"] #main-app { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
     body[data-device-mode="phone"] #main-layout { overflow-y: visible; height: auto; }
     body[data-device-mode="phone"] #canvas-container { min-height: 260px; flex: 0 0 auto; }
     body[data-device-mode="phone"] #charts-container { overflow: visible; display: block; }
@@ -650,37 +650,37 @@
       const analyzedPreview = document.getElementById('phone-analyzed-preview');
       const analyzedEmpty = document.getElementById('phone-analyzed-preview-empty');
 
-      if (originalPreview) {
-        const hasOriginal = Boolean(originalPreviewUrl);
-        if (hasOriginal && originalPreview.src !== originalPreviewUrl) {
-          originalPreview.src = originalPreviewUrl;
-          originalPreview.load();
-        }
-        if (!hasOriginal && originalPreview.src) {
-          originalPreview.removeAttribute('src');
-          originalPreview.load();
-        }
-        if (originalEmpty) {
-          originalEmpty.style.display = hasOriginal ? 'none' : 'block';
-        }
-        originalPreview.style.display = hasOriginal ? 'block' : 'none';
-      }
+      const syncPreviewElement = (previewElement, emptyElement, previewUrl) => {
+        if (!previewElement) return;
 
-      if (analyzedPreview) {
-        const hasAnalyzed = Boolean(analyzedPreviewUrl);
-        if (hasAnalyzed && analyzedPreview.src !== analyzedPreviewUrl) {
-          analyzedPreview.src = analyzedPreviewUrl;
-          analyzedPreview.load();
+        const hasPreview = Boolean(previewUrl);
+        const currentSrc = previewElement.currentSrc || previewElement.src || '';
+        const shouldUpdateSrc = hasPreview && currentSrc !== previewUrl;
+
+        if (shouldUpdateSrc) {
+          const wasPlaying = !previewElement.paused && !previewElement.ended;
+          previewElement.src = previewUrl;
+          if (wasPlaying) {
+            previewElement.play().catch(() => {
+              // Ignore autoplay policy errors on mobile browsers.
+            });
+          }
         }
-        if (!hasAnalyzed && analyzedPreview.src) {
-          analyzedPreview.removeAttribute('src');
-          analyzedPreview.load();
+
+        if (!hasPreview && currentSrc) {
+          previewElement.pause();
+          previewElement.removeAttribute('src');
+          previewElement.load();
         }
-        if (analyzedEmpty) {
-          analyzedEmpty.style.display = hasAnalyzed ? 'none' : 'block';
+
+        if (emptyElement) {
+          emptyElement.style.display = hasPreview ? 'none' : 'block';
         }
-        analyzedPreview.style.display = hasAnalyzed ? 'block' : 'none';
-      }
+        previewElement.style.display = hasPreview ? 'block' : 'none';
+      };
+
+      syncPreviewElement(originalPreview, originalEmpty, originalPreviewUrl);
+      syncPreviewElement(analyzedPreview, analyzedEmpty, analyzedPreviewUrl);
     }
 
     function getAnalysisSourceMode() {
@@ -2620,7 +2620,6 @@
     window.addEventListener('resize', handleViewportChange);
     window.addEventListener('orientationchange', handleViewportChange);
     window.visualViewport?.addEventListener('resize', handleViewportChange);
-    window.visualViewport?.addEventListener('scroll', handleViewportChange);
 
     // Memory cleanup every 5 minutes (idle only, never interrupt an active session)
     setInterval(async () => {
