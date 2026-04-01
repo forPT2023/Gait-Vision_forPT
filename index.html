@@ -1430,10 +1430,17 @@
               await finalizeSession();
               stopAllProcessing();
               
-              // Enable save analyzed video button after analysis completes
+              // Generate analyzed preview and enable export button after analysis completes
               if (videoFileUrl && analysisData.length > 0) {
-                document.getElementById('btn-save-analyzed-video').disabled = false;
-                showNotification('解析完了！「解析動画」ボタンから出力できます。', 'success');
+                try {
+                  await ensureAnalyzedPreviewReady({ notify: false });
+                  document.getElementById('btn-save-analyzed-video').disabled = false;
+                  showNotification('解析完了！解析動画を生成しました。「解析動画」ボタンから保存できます。', 'success');
+                } catch (previewError) {
+                  console.error('[Analysis] Failed to pre-generate analyzed preview:', previewError);
+                  document.getElementById('btn-save-analyzed-video').disabled = false;
+                  showNotification('解析完了。解析動画の事前生成に失敗したため、保存時に再生成します。', 'warning');
+                }
               }
             }
           };
