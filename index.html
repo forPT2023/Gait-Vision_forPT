@@ -524,6 +524,7 @@
     let isStartingAnalysis = false;
     let isRecording = false;
     let isHandlingRecordAction = false;
+    let lastRecordActionAt = 0;
     let isLoadingVideo = false; // Prevent concurrent video loads
     let mediaStream = null;
     let mediaRecorder = null;
@@ -553,6 +554,7 @@
     let analyzedPreviewBlob = null;
     let analyzedPreviewMimeType = '';
     let isGeneratingAnalyzedPreview = false;
+    const RECORD_ACTION_COOLDOWN_MS = 800;
     let videoEpochBaseMs = null; // For Chart.js realtime x-axis in video mode
     let videoFrameCallbackHandle = null; // requestVideoFrameCallback handle (video mode)
     let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -2679,11 +2681,18 @@
     });
 
     async function handleRecordAction() {
+      const now = Date.now();
+      if ((now - lastRecordActionAt) < RECORD_ACTION_COOLDOWN_MS) {
+        console.warn('[Record Action] Ignored rapid duplicate trigger');
+        return;
+      }
+
       if (isHandlingRecordAction) {
         console.warn('[Record Action] Ignored duplicate trigger while previous action is still running');
         return;
       }
 
+      lastRecordActionAt = now;
       isHandlingRecordAction = true;
       syncPhoneStageActions();
       // Video mode: start/stop analysis
