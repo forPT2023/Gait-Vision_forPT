@@ -523,6 +523,7 @@
     let isAnalyzing = false;
     let isStartingAnalysis = false;
     let isRecording = false;
+    let isHandlingRecordAction = false;
     let isLoadingVideo = false; // Prevent concurrent video loads
     let mediaStream = null;
     let mediaRecorder = null;
@@ -712,6 +713,67 @@
       }
     }
 
+    function estimateAnalysisFrameRate() {
+      if (!Array.isArray(analysisData) || analysisData.length < 4) {
+        return null;
+      }
+
+      const deltas = [];
+      let prev = analysisData[0]?.elapsedMs;
+      for (let i = 1; i < analysisData.length; i++) {
+        const current = analysisData[i]?.elapsedMs;
+        if (!Number.isFinite(current) || !Number.isFinite(prev)) {
+          prev = current;
+          continue;
+        }
+
+        const delta = current - prev;
+        if (delta > 0 && delta < 1000) {
+          deltas.push(delta);
+        }
+        prev = current;
+      }
+
+      if (!deltas.length) {
+        return null;
+      }
+
+      deltas.sort((a, b) => a - b);
+      const medianDelta = deltas[Math.floor(deltas.length / 2)];
+      if (!Number.isFinite(medianDelta) || medianDelta <= 0) {
+        return null;
+      }
+
+      return 1000 / medianDelta;
+    }
+
+    function estimateExportFrameRate(sourceVideoElement) {
+      const analysisFps = estimateAnalysisFrameRate();
+      const sourceDurationSec = Number.isFinite(sourceVideoElement?.duration) ? sourceVideoElement.duration : null;
+      const sampledFps = (sourceDurationSec && analysisData.length >= 2)
+        ? (analysisData.length / sourceDurationSec)
+        : null;
+      const candidates = [analysisFps, sampledFps].filter((value) => Number.isFinite(value) && value > 0);
+      if (!candidates.length) {
+        return 30;
+      }
+
+      const avg = candidates.reduce((sum, value) => sum + value, 0) / candidates.length;
+      return Math.round(Math.min(60, Math.max(24, avg)));
+    }
+
+    function estimateExportVideoBitrate({ width, height, fps }) {
+      const safeWidth = Number.isFinite(width) && width > 0 ? width : 1280;
+      const safeHeight = Number.isFinite(height) && height > 0 ? height : 720;
+      const safeFps = Number.isFinite(fps) && fps > 0 ? fps : 30;
+
+      // Empirical baseline to avoid blocky/jittery overlays on mobile while keeping output size reasonable.
+      const pixelsPerFrame = safeWidth * safeHeight;
+      const bitsPerPixelPerFrame = 0.12;
+      const estimated = Math.round(pixelsPerFrame * safeFps * bitsPerPixelPerFrame);
+      return Math.min(12_000_000, Math.max(3_000_000, estimated));
+    }
+
     function syncOrientationWarning() {
       updateOrientationWarning({
         documentRef: document,
@@ -879,13 +941,13 @@
       if (!stagePanel) return;
       stagePanel.classList.toggle('hidden-panel', deviceMode !== 'phone');
 
-      if (videoButton) videoButton.disabled = isAnalyzing || isRecording || isLoadingVideo || isGeneratingAnalyzedPreview;
+      if (videoButton) videoButton.disabled = isAnalyzing || isRecording || isLoadingVideo || isGeneratingAnalyzedPreview || isHandlingRecordAction;
       if (analyzeButton) {
         const sourceMode = getAnalysisSourceMode();
         const hasSource = sourceMode === 'video'
           ? Boolean(videoFileUrl)
           : Boolean(videoElement.srcObject);
-        const canStart = !isAnalyzing && !isLoadingVideo && !isGeneratingAnalyzedPreview && hasSource;
+        const canStart = !isAnalyzing && !isLoadingVideo && !isGeneratingAnalyzedPreview && !isHandlingRecordAction && hasSource;
         const canStop = isAnalyzing;
         analyzeButton.disabled = !(canStart || canStop);
         analyzeButton.textContent = isGeneratingAnalyzedPreview
@@ -2018,7 +2080,15 @@
           logger: console
         });
 
-        const stream = canvasElement.captureStream(30);
+        const exportFps = estimateExportFrameRate(exportVideoElement);
+        const exportBitrate = estimateExportVideoBitrate({
+          width: exportVideoElement.videoWidth,
+          height: exportVideoElement.videoHeight,
+          fps: exportFps
+        });
+        console.log('[Preview Export] fps:', exportFps, '| bitrate:', exportBitrate, '| resolution:', exportVideoElement.videoWidth, 'x', exportVideoElement.videoHeight);
+
+        const stream = canvasElement.captureStream(exportFps);
         const chunks = [];
         const {
           mimeType,
@@ -2026,7 +2096,7 @@
         } = createCanvasRecordingSession({
           stream,
           MediaRecorderCtor: MediaRecorder,
-          videoBitsPerSecond: 2500000
+          videoBitsPerSecond: exportBitrate
         });
 
         let exportActive = false;
@@ -2609,23 +2679,35 @@
     });
 
     async function handleRecordAction() {
-      // Video mode: start/stop analysis
-      if (getAnalysisSourceMode() === 'video') {
-        if (isAnalyzing) {
-          // Stop analysis
-          stopAllProcessing();
-        } else {
-          // Start analysis
-          await startAnalysis();
-        }
+      if (isHandlingRecordAction) {
+        console.warn('[Record Action] Ignored duplicate trigger while previous action is still running');
+        return;
       }
-      // Camera mode: start/stop recording
-      else {
-        if (isRecording) {
-          stopRecording();
-        } else {
-          startRecording();
+
+      isHandlingRecordAction = true;
+      syncPhoneStageActions();
+      // Video mode: start/stop analysis
+      try {
+        if (getAnalysisSourceMode() === 'video') {
+          if (isAnalyzing) {
+            // Stop analysis
+            stopAllProcessing();
+          } else {
+            // Start analysis
+            await startAnalysis();
+          }
         }
+        // Camera mode: start/stop recording
+        else {
+          if (isRecording) {
+            stopRecording();
+          } else {
+            startRecording();
+          }
+        }
+      } finally {
+        isHandlingRecordAction = false;
+        syncPhoneStageActions();
       }
     }
 
