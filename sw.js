@@ -1,8 +1,8 @@
 // Service Worker for Gait VISION forPT
-// Version: 3.10.3-pwa2
+// Version: 3.10.4-pwa1
 // Purpose: Cache all external CDN resources for offline operation
 
-const CACHE_VERSION = 'gait-vision-v3.10.3-pwa2';
+const CACHE_VERSION = 'gait-vision-v3.10.4-pwa1';
 const CACHE_NAME = `gait-vision-cache-${CACHE_VERSION}`;
 
 const LOCAL_RESOURCES = [
@@ -56,6 +56,11 @@ const EXTERNAL_RESOURCES_TO_CACHE = [
   'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
 ];
+
+const LOCAL_RESOURCE_PATHS = new Set(LOCAL_RESOURCES.map((path) => {
+  const normalized = path.startsWith('./') ? path.slice(1) : path;
+  return normalized === '/' ? '/' : normalized;
+}));
 
 // Install event: Cache all resources
 self.addEventListener('install', (event) => {
@@ -116,6 +121,49 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const normalizedPathname = requestUrl.pathname.endsWith('/')
+    ? `${requestUrl.pathname}index.html`
+    : requestUrl.pathname;
+  const isNavigationRequest = event.request.mode === 'navigate';
+  const isLocalAppResource = isSameOrigin && (
+    LOCAL_RESOURCE_PATHS.has(requestUrl.pathname) ||
+    LOCAL_RESOURCE_PATHS.has(normalizedPathname)
+  );
+
+  // For app shell resources, prioritize network to avoid stale UI/logic after deploy.
+  if (isNavigationRequest || isLocalAppResource) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse?.ok) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          return caches.match(event.request).then((cachedResponse) => {
+            if (cachedResponse) return cachedResponse;
+            if (isNavigationRequest) {
+              return caches.match(new URL('./index.html', self.registration.scope).href);
+            }
+            return new Response('Offline - Resource not available', {
+              status: 503,
+              statusText: 'Service Unavailable',
+              headers: new Headers({
+                'Content-Type': 'text/plain'
+              })
+            });
+          });
+        })
+    );
     return;
   }
 
