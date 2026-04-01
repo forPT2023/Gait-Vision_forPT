@@ -3,8 +3,8 @@ export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => perf
 }
 
 export function getSourceMode({ hasStream, videoFileUrl }) {
-  if (hasStream) return 'camera';
   if (videoFileUrl) return 'video';
+  if (hasStream) return 'camera';
   return 'idle';
 }
 
