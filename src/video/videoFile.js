@@ -55,6 +55,7 @@ export function configureVideoElementForFile(videoElement) {
   videoElement.setAttribute('playsinline', '');
   videoElement.preload = 'auto';
   videoElement.muted = true;
+  videoElement.autoplay = false;
 }
 
 export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger = console }) {

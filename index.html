@@ -355,7 +355,7 @@
       <div id="canvas-container">
         <div class="video-frame-badge">モバイル最適表示</div>
         <div class="video-frame-guide"></div>
-        <video id="video-element" autoplay playsinline webkit-playsinline></video>
+        <video id="video-element" playsinline webkit-playsinline></video>
         <canvas id="canvas-element"></canvas>
       </div>
 
@@ -521,6 +521,7 @@
     let currentPlane = 'frontal';
     let analysisPlane = 'frontal';
     let isAnalyzing = false;
+    let isStartingAnalysis = false;
     let isRecording = false;
     let isLoadingVideo = false; // Prevent concurrent video loads
     let mediaStream = null;
@@ -1547,88 +1548,99 @@
 
     // Analysis
     async function startAnalysis() {
-      console.log('[Analysis] Starting...');
-      resetAnalysisOutputButtons();
-
-      if (!poseLandmarker) {
-        showNotification('MediaPipeが初期化されていません', 'error');
+      if (isStartingAnalysis) {
+        console.warn('[Analysis] Start request ignored: already starting');
         return false;
       }
+      if (isAnalyzing) {
+        console.log('[Analysis] Start request ignored: already running');
+        return true;
+      }
 
-      ({
-        previewAnimationId,
-        videoFrameCallbackHandle
-      } = cancelScheduledMediaWork({
-        previewAnimationId,
-        cancelAnimationFrameFn: cancelAnimationFrame,
-        videoElement,
-        videoFrameCallbackHandle
-      }));
+      isStartingAnalysis = true;
+      try {
+        console.log('[Analysis] Starting...');
+        resetAnalysisOutputButtons();
 
-      // For video files: start playback (SIMPLIFIED)
-      if (videoFileUrl) {
-        try {
-          ({ videoEpochBaseMs } = await startVideoPlaybackForAnalysis({
-            videoElement,
-            logger: console,
-            now: () => Date.now()
-          }));
-        } catch (e) {
-          console.error('[Analysis] Video play() failed:', e);
-          showNotification('動画の再生に失敗しました', 'error');
+        if (!poseLandmarker) {
+          showNotification('MediaPipeが初期化されていません', 'error');
           return false;
         }
-      } else {
-        videoEpochBaseMs = null;
-      }
+
+        ({
+          previewAnimationId,
+          videoFrameCallbackHandle
+        } = cancelScheduledMediaWork({
+          previewAnimationId,
+          cancelAnimationFrameFn: cancelAnimationFrame,
+          videoElement,
+          videoFrameCallbackHandle
+        }));
+
+      // For video files: start playback (SIMPLIFIED)
+        if (videoFileUrl) {
+          try {
+            ({ videoEpochBaseMs } = await startVideoPlaybackForAnalysis({
+              videoElement,
+              logger: console,
+              now: () => Date.now()
+            }));
+          } catch (e) {
+            console.error('[Analysis] Video play() failed:', e);
+            showNotification('動画の再生に失敗しました', 'error');
+            return false;
+          }
+        } else {
+          videoEpochBaseMs = null;
+        }
 
       // Reset analysis state
-      isAnalyzing = true;
-      analysisPlane = currentPlane;
-      syncDeviceModeUi();
-      ({
-        analysisStartEpochMs,
-        analysisStartMpTimestamp,
-        analysisData,
-        prevLandmarks,
-        prevWorldLandmarks,
-        prevTimestamp,
-        gaitEvents,
-        stepCount,
-        lastHeelStrikeTime,
-        emaValues
-      } = createStartedAnalysisState({
-        createInitialEmaValues,
-        now: () => Date.now()
-      }));
+        isAnalyzing = true;
+        analysisPlane = currentPlane;
+        syncDeviceModeUi();
+        ({
+          analysisStartEpochMs,
+          analysisStartMpTimestamp,
+          analysisData,
+          prevLandmarks,
+          prevWorldLandmarks,
+          prevTimestamp,
+          gaitEvents,
+          stepCount,
+          lastHeelStrikeTime,
+          emaValues
+        } = createStartedAnalysisState({
+          createInitialEmaValues,
+          now: () => Date.now()
+        }));
 
       // Start charts
-      chartController.startCharts();
-      console.log('[Analysis] Analysis started successfully');
+        chartController.startCharts();
+        console.log('[Analysis] Analysis started successfully');
 
       // Update button for video mode
-      if (videoFileUrl) {
-        const recordBtn = document.getElementById('btn-record');
-        setRecordButtonForActiveAnalysis(recordBtn);
-      }
+        if (videoFileUrl) {
+          const recordBtn = document.getElementById('btn-record');
+          setRecordButtonForActiveAnalysis(recordBtn);
+        }
 
-      let frameCount = 0;
-      let lastMpTimestamp = -1;
+        let frameCount = 0;
+        let lastMpTimestamp = -1;
 
-      const scheduleNext = () => {
-        ({
-          animationFrameId,
-          videoFrameCallbackHandle
-        } = scheduleAnalysisFrame({
-          isAnalyzing,
-          isVideoMode: !!videoFileUrl,
-          videoElement,
-          callback: processFrame,
-          requestAnimationFrameFn: requestAnimationFrame
-        }));
-      };
+        const scheduleNext = () => {
+          ({
+            animationFrameId,
+            videoFrameCallbackHandle
+          } = scheduleAnalysisFrame({
+            isAnalyzing,
+            isVideoMode: !!videoFileUrl,
+            videoElement,
+            callback: processFrame,
+            requestAnimationFrameFn: requestAnimationFrame
+          }));
+        };
 
-      async function processFrame() {
+        async function processFrame() {
         try {
           const mpTimestamp = getCurrentMediaPipeTimestamp();
           const framePlan = prepareAnalysisFrame({
@@ -1749,10 +1761,14 @@
           }
           scheduleNext();
         }
-      }
+        }
 
-      // Kick
-      scheduleNext();
+        // Kick
+        scheduleNext();
+        return true;
+      } finally {
+        isStartingAnalysis = false;
+      }
     }
 
 
