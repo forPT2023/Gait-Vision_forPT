@@ -699,13 +699,13 @@
       });
     }
 
-    function renderAnalysisFrameFromData(dataPoint) {
-      if (!videoElement.videoWidth || !videoElement.videoHeight || !canvasElement.width || !canvasElement.height) {
+    function renderAnalysisFrameFromData(dataPoint, sourceVideoElement = videoElement) {
+      if (!sourceVideoElement || !sourceVideoElement.videoWidth || !sourceVideoElement.videoHeight || !canvasElement.width || !canvasElement.height) {
         return;
       }
 
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(sourceVideoElement, 0, 0, canvasElement.width, canvasElement.height);
 
       if (dataPoint?.landmarks?.length) {
         drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false);
@@ -832,14 +832,14 @@
       document.getElementById('btn-csv').disabled = true;
       document.getElementById('btn-report').disabled = true;
       document.getElementById('btn-save-analyzed-video').disabled = true;
+      clearAnalyzedPreviewState();
+      syncPhoneVideoPreviews();
       syncPhoneQuickActions();
     }
 
     function prepareForNewCaptureSession({ resetCharts = false } = {}) {
       phoneFlowView = 'capture';
       resetAnalysisOutputButtons();
-      clearAnalyzedPreviewState();
-      syncPhoneVideoPreviews();
       if (resetCharts) {
         chartController.resetCharts();
       }
@@ -2041,7 +2041,7 @@
 
           const elapsedMs = Math.max(0, exportVideoElement.currentTime * 1000);
           const dataPoint = findClosestAnalysisPoint(analysisData, elapsedMs);
-          renderAnalysisFrameFromData(dataPoint);
+          renderAnalysisFrameFromData(dataPoint, exportVideoElement);
 
           if (exportVideoElement.ended) {
             return;
@@ -2073,7 +2073,7 @@
           }
           exportVideoElement.pause();
           const restorePoint = findClosestAnalysisPoint(analysisData, videoElement.currentTime * 1000);
-          renderAnalysisFrameFromData(restorePoint);
+          renderAnalysisFrameFromData(restorePoint, videoElement);
         };
 
         recorder.ondataavailable = (e) => {
@@ -2121,7 +2121,7 @@
         });
 
         exportVideoElement.currentTime = 0;
-        renderAnalysisFrameFromData(findClosestAnalysisPoint(analysisData, 0));
+        renderAnalysisFrameFromData(findClosestAnalysisPoint(analysisData, 0), exportVideoElement);
         recorder.start();
         exportActive = true;
 
