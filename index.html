@@ -1433,13 +1433,7 @@
               // Enable save analyzed video button after analysis completes
               if (videoFileUrl && analysisData.length > 0) {
                 document.getElementById('btn-save-analyzed-video').disabled = false;
-                showNotification('解析完了！解析プレビューを準備しています…', 'success');
-                try {
-                  await ensureAnalyzedPreviewReady({ notify: false });
-                  showNotification('解析プレビューの準備ができました', 'success');
-                } catch (previewError) {
-                  console.warn('[Preview] Auto build skipped:', previewError);
-                }
+                showNotification('解析完了！「解析動画」ボタンから出力できます。', 'success');
               }
             }
           };
@@ -1999,6 +1993,7 @@
 
       let endedHandler = null;
       let videoErrorHandler = null;
+      let cleanupRecorderListeners = null;
       try {
         if (isAnalyzing) {
           stopAllProcessing();
@@ -2084,7 +2079,6 @@
           }
         };
 
-        let cleanupRecorderListeners = null;
         const recorderStopPromise = new Promise((resolve, reject) => {
           const onRecorderStop = () => {
             cleanupRecorderListeners?.();
