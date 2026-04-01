@@ -162,6 +162,8 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
   });
 }
 
+const playbackStartLocks = new WeakSet();
+
 export async function startVideoPlaybackForAnalysis({
   videoElement,
   logger = console,
@@ -169,19 +171,44 @@ export async function startVideoPlaybackForAnalysis({
   reloadDelayMs = 100,
   setTimeoutFn = setTimeout
 }) {
-  logger.log('[Analysis] Video mode - starting playback');
-  videoElement.currentTime = 0;
-
-  if (videoElement.ended) {
-    logger.log('[Analysis] Reloading ended video');
-    videoElement.load();
-    await new Promise((resolve) => setTimeoutFn(resolve, reloadDelayMs));
+  if (!videoElement) {
+    throw new Error('Video element is required');
   }
 
-  await videoElement.play();
-  logger.log('[Analysis] Video play() succeeded');
+  if (playbackStartLocks.has(videoElement)) {
+    logger.warn?.('[Analysis] Duplicate video start ignored: playback start already in progress');
+    return {
+      videoEpochBaseMs: now(),
+      playbackAlreadyStarting: true
+    };
+  }
 
-  return {
-    videoEpochBaseMs: now()
-  };
+  if (videoElement.paused === false && !videoElement.ended) {
+    logger.log('[Analysis] Video already playing; skipping restart');
+    return {
+      videoEpochBaseMs: now(),
+      playbackAlreadyRunning: true
+    };
+  }
+
+  playbackStartLocks.add(videoElement);
+  logger.log('[Analysis] Video mode - starting playback');
+  try {
+    videoElement.currentTime = 0;
+
+    if (videoElement.ended) {
+      logger.log('[Analysis] Reloading ended video');
+      videoElement.load();
+      await new Promise((resolve) => setTimeoutFn(resolve, reloadDelayMs));
+    }
+
+    await videoElement.play();
+    logger.log('[Analysis] Video play() succeeded');
+
+    return {
+      videoEpochBaseMs: now()
+    };
+  } finally {
+    playbackStartLocks.delete(videoElement);
+  }
 }

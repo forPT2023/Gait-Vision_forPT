@@ -467,3 +467,55 @@ test('startVideoPlaybackForAnalysis reloads ended videos before playing', async 
     globalThis.setTimeout = originalSetTimeout;
   }
 });
+
+test('startVideoPlaybackForAnalysis ignores duplicate starts while play() is still pending', async () => {
+  let resolvePlay;
+  let playCalls = 0;
+  const videoElement = {
+    currentTime: 5,
+    ended: false,
+    paused: true,
+    play() {
+      playCalls += 1;
+      return new Promise((resolve) => {
+        resolvePlay = resolve;
+      });
+    }
+  };
+
+  const firstStart = startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn() {} },
+    now: () => 1000
+  });
+  const secondStart = await startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn() {} },
+    now: () => 1001
+  });
+
+  assert.equal(playCalls, 1);
+  assert.equal(secondStart.playbackAlreadyStarting, true);
+
+  resolvePlay();
+  await firstStart;
+});
+
+test('startVideoPlaybackForAnalysis does not restart when video is already playing', async () => {
+  let playCalled = false;
+  const result = await startVideoPlaybackForAnalysis({
+    videoElement: {
+      currentTime: 12,
+      ended: false,
+      paused: false,
+      async play() {
+        playCalled = true;
+      }
+    },
+    logger: { log() {} },
+    now: () => 456
+  });
+
+  assert.equal(playCalled, false);
+  assert.equal(result.playbackAlreadyRunning, true);
+});
