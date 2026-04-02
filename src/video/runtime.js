@@ -1,5 +1,14 @@
 export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => performance.now() }) {
-  return hasStream ? now() : currentTime * 1000;
+  if (hasStream) {
+    return now();
+  }
+
+  const safeCurrentTime = Number(currentTime);
+  if (!Number.isFinite(safeCurrentTime)) {
+    return 0;
+  }
+
+  return Math.max(0, safeCurrentTime * 1000);
 }
 
 export function getSourceMode({ hasStream, videoFileUrl }) {
@@ -318,7 +327,9 @@ export function getPostAnalysisStopPlan({
 }
 
 export function findClosestAnalysisPoint(analysisData, elapsedMs) {
-  if (!analysisData.length) return null;
+  if (!Array.isArray(analysisData) || analysisData.length === 0) return null;
+  const safeElapsedMs = Number(elapsedMs);
+  const targetElapsedMs = Number.isFinite(safeElapsedMs) ? safeElapsedMs : 0;
 
   let low = 0;
   let high = analysisData.length - 1;
@@ -326,7 +337,7 @@ export function findClosestAnalysisPoint(analysisData, elapsedMs) {
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
     const midValue = analysisData[mid].elapsedMs ?? analysisData[mid].timestamp ?? 0;
-    if (midValue < elapsedMs) {
+    if (midValue < targetElapsedMs) {
       low = mid + 1;
     } else {
       high = mid;
@@ -338,7 +349,111 @@ export function findClosestAnalysisPoint(analysisData, elapsedMs) {
   const candidateTime = candidate?.elapsedMs ?? candidate?.timestamp ?? 0;
   const previousTime = previous?.elapsedMs ?? previous?.timestamp ?? 0;
 
-  return Math.abs(candidateTime - elapsedMs) < Math.abs(previousTime - elapsedMs)
+  return Math.abs(candidateTime - targetElapsedMs) < Math.abs(previousTime - targetElapsedMs)
     ? candidate
     : previous;
+}
+
+function interpolateScalar(startValue, endValue, ratio) {
+  const safeStart = Number(startValue);
+  const safeEnd = Number(endValue);
+  if (!Number.isFinite(safeStart) && !Number.isFinite(safeEnd)) return undefined;
+  if (!Number.isFinite(safeStart)) return safeEnd;
+  if (!Number.isFinite(safeEnd)) return safeStart;
+  return safeStart + ((safeEnd - safeStart) * ratio);
+}
+
+function interpolateLandmarkSets(startSet, endSet, ratio) {
+  if (!Array.isArray(startSet) || !Array.isArray(endSet)) {
+    return null;
+  }
+
+  if (startSet.length !== endSet.length || startSet.length === 0) {
+    return null;
+  }
+
+  const interpolated = startSet.map((startLandmark, index) => {
+    const endLandmark = endSet[index];
+    if (!startLandmark || !endLandmark) {
+      return null;
+    }
+
+    return {
+      x: interpolateScalar(startLandmark.x, endLandmark.x, ratio),
+      y: interpolateScalar(startLandmark.y, endLandmark.y, ratio),
+      z: interpolateScalar(startLandmark.z, endLandmark.z, ratio),
+      visibility: interpolateScalar(startLandmark.visibility, endLandmark.visibility, ratio),
+      presence: interpolateScalar(startLandmark.presence, endLandmark.presence, ratio)
+    };
+  });
+
+  return interpolated.every((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+    ? interpolated
+    : null;
+}
+
+export function findInterpolatedAnalysisPoint(analysisData, elapsedMs) {
+  if (!Array.isArray(analysisData) || analysisData.length === 0) {
+    return null;
+  }
+
+  const safeElapsedMs = Number(elapsedMs);
+  if (!Number.isFinite(safeElapsedMs)) {
+    return findClosestAnalysisPoint(analysisData, 0);
+  }
+
+  if (analysisData.length === 1) {
+    return analysisData[0];
+  }
+
+  let low = 0;
+  let high = analysisData.length - 1;
+
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const midValue = analysisData[mid].elapsedMs ?? analysisData[mid].timestamp ?? 0;
+    if (midValue < safeElapsedMs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  const upper = analysisData[low];
+  const lower = analysisData[Math.max(0, low - 1)];
+  const upperTime = upper?.elapsedMs ?? upper?.timestamp ?? 0;
+  const lowerTime = lower?.elapsedMs ?? lower?.timestamp ?? 0;
+
+  if (upperTime <= lowerTime) {
+    return upper ?? lower ?? null;
+  }
+
+  if (safeElapsedMs <= lowerTime) {
+    return lower;
+  }
+
+  if (safeElapsedMs >= upperTime) {
+    return upper;
+  }
+
+  const interpolationRatio = (safeElapsedMs - lowerTime) / (upperTime - lowerTime);
+  const landmarks = interpolateLandmarkSets(lower?.landmarks, upper?.landmarks, interpolationRatio);
+  const worldLandmarks = interpolateLandmarkSets(lower?.worldLandmarks, upper?.worldLandmarks, interpolationRatio);
+  const lowerTimestamp = Number(lower?.timestamp);
+  const upperTimestamp = Number(upper?.timestamp);
+  const timestamp = Number.isFinite(lowerTimestamp) && Number.isFinite(upperTimestamp)
+    ? interpolateScalar(lowerTimestamp, upperTimestamp, interpolationRatio)
+    : safeElapsedMs;
+
+  if (!landmarks) {
+    return findClosestAnalysisPoint(analysisData, safeElapsedMs);
+  }
+
+  return {
+    ...upper,
+    elapsedMs: safeElapsedMs,
+    timestamp,
+    landmarks,
+    worldLandmarks: worldLandmarks || upper?.worldLandmarks || lower?.worldLandmarks || null
+  };
 }

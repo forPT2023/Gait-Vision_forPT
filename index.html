@@ -505,7 +505,7 @@
     import { buildCameraConstraints, listAvailableVideoInputs, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from './src/video/camera.js';
     import { calculateCanvasLayout, getDefaultVideoAspectRatio, resolveDisplaySourceDimensions, syncCanvasDisplaySize } from './src/video/display.js';
     import { buildAnalyzedVideoFilename, buildRecordingFilename, buildRecordingMetadata, closeSaveRecordingDialog, createCanvasRecordingSession, downloadBlob, formatRecordingInfoText, resetRecordedVideoState, showSaveRecordingDialog as showRecordingSaveDialog } from './src/video/recording.js';
-    import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findClosestAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
+    import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findInterpolatedAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     console.log(`${APP_VERSION_LABEL} (Fixed: Canvas Size & Graph Accuracy) - Initializing...`);
@@ -520,6 +520,7 @@
     let isRecording = false;
     let isHandlingRecordAction = false;
     let lastRecordActionAt = 0;
+    let isSavingAnalyzedVideo = false;
     let isLoadingVideo = false; // Prevent concurrent video loads
     let mediaStream = null;
     let mediaRecorder = null;
@@ -697,6 +698,12 @@
       });
     }
 
+    function getSafeVideoElapsedMs(targetVideoElement) {
+      if (!targetVideoElement) return 0;
+      const currentTime = Number(targetVideoElement.currentTime);
+      return Number.isFinite(currentTime) && currentTime > 0 ? currentTime * 1000 : 0;
+    }
+
     function renderAnalysisFrameFromData(dataPoint, sourceVideoElement = videoElement) {
       if (!sourceVideoElement || !sourceVideoElement.videoWidth || !sourceVideoElement.videoHeight || !canvasElement.width || !canvasElement.height) {
         return;
@@ -706,7 +713,7 @@
       canvasCtx.drawImage(sourceVideoElement, 0, 0, canvasElement.width, canvasElement.height);
 
       if (dataPoint?.landmarks?.length) {
-        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false);
+        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, true);
       }
     }
 
@@ -879,7 +886,7 @@
 
     function syncPhoneQuickActions() {
       const state = getPhoneQuickActionDisabledState({
-        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled,
+        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled || isSavingAnalyzedVideo,
         reportDisabled: document.getElementById('btn-report').disabled,
         csvDisabled: document.getElementById('btn-csv').disabled
       });
@@ -894,7 +901,7 @@
 
     function syncPhoneStageActions(quickActionState = null) {
       const state = quickActionState || getPhoneQuickActionDisabledState({
-        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled,
+        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled || isSavingAnalyzedVideo,
         reportDisabled: document.getElementById('btn-report').disabled,
         csvDisabled: document.getElementById('btn-csv').disabled
       });
@@ -922,7 +929,7 @@
           ? '⏳ 解析プレビュー生成中'
           : (canStop ? '⏹ 解析停止' : '▶️ 解析開始');
       }
-      if (saveButton) saveButton.disabled = state.analyzedVideoDisabled || isGeneratingAnalyzedPreview;
+      if (saveButton) saveButton.disabled = state.analyzedVideoDisabled || isGeneratingAnalyzedPreview || isSavingAnalyzedVideo;
       if (reportButton) reportButton.disabled = state.reportDisabled;
       if (csvButton) csvButton.disabled = state.csvDisabled;
     }
@@ -1053,7 +1060,20 @@
       const drawingUtils = new DrawingUtils(canvasCtx);
       drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, { color: '#00ffff', lineWidth: 3 });
       drawingUtils.drawLandmarks(landmarks, { radius: 4, color: '#ffffff', fillColor: '#ffffff' });
-      const keyJoints = [LM.LEFT_HIP, LM.RIGHT_HIP, LM.LEFT_KNEE, LM.RIGHT_KNEE, LM.LEFT_ANKLE, LM.RIGHT_ANKLE, LM.LEFT_HEEL, LM.RIGHT_HEEL];
+      const keyJoints = [
+        LM.LEFT_SHOULDER,
+        LM.RIGHT_SHOULDER,
+        LM.LEFT_ELBOW,
+        LM.RIGHT_ELBOW,
+        LM.LEFT_HIP,
+        LM.RIGHT_HIP,
+        LM.LEFT_KNEE,
+        LM.RIGHT_KNEE,
+        LM.LEFT_ANKLE,
+        LM.RIGHT_ANKLE,
+        LM.LEFT_HEEL,
+        LM.RIGHT_HEEL
+      ];
       keyJoints.forEach(idx => {
         if (landmarks[idx]) {
           const x = landmarks[idx].x * canvasElement.width;
@@ -1182,7 +1202,7 @@
               if (results.landmarks && results.landmarks.length > 0) {
                 const landmarks = results.landmarks[0];
                 const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
-                drawEnhancedLandmarks(landmarks, worldLandmarks, false);
+                drawEnhancedLandmarks(landmarks, worldLandmarks, true);
 
                 const deltaT = (previewPrevMpTimestamp != null) ? (mpTimestamp - previewPrevMpTimestamp) : 0;
 
@@ -1712,7 +1732,7 @@
           if (results.landmarks && results.landmarks.length > 0) {
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
-            drawEnhancedLandmarks(landmarks, worldLandmarks, false);
+            drawEnhancedLandmarks(landmarks, worldLandmarks, true);
 
             const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
             const angles = worldLandmarks ? calcJointAngles(worldLandmarks) : null;
@@ -2084,8 +2104,8 @@
         const renderExportFrame = () => {
           if (!exportActive) return;
 
-          const elapsedMs = Math.max(0, exportVideoElement.currentTime * 1000);
-          const dataPoint = findClosestAnalysisPoint(analysisData, elapsedMs);
+          const elapsedMs = getSafeVideoElapsedMs(exportVideoElement);
+          const dataPoint = findInterpolatedAnalysisPoint(analysisData, elapsedMs);
           renderAnalysisFrameFromData(dataPoint, exportVideoElement);
 
           if (exportVideoElement.ended) {
@@ -2117,7 +2137,7 @@
             recorder.stop();
           }
           exportVideoElement.pause();
-          const restorePoint = findClosestAnalysisPoint(analysisData, videoElement.currentTime * 1000);
+          const restorePoint = findInterpolatedAnalysisPoint(analysisData, getSafeVideoElapsedMs(videoElement));
           renderAnalysisFrameFromData(restorePoint, videoElement);
         };
 
@@ -2166,7 +2186,7 @@
         });
 
         exportVideoElement.currentTime = 0;
-        renderAnalysisFrameFromData(findClosestAnalysisPoint(analysisData, 0), exportVideoElement);
+        renderAnalysisFrameFromData(findInterpolatedAnalysisPoint(analysisData, 0), exportVideoElement);
         recorder.start();
         exportActive = true;
 
@@ -2239,6 +2259,11 @@
 
     // Save analyzed video (for video file mode)
     async function saveAnalyzedVideo() {
+      if (isSavingAnalyzedVideo) {
+        showNotification('解析動画の保存処理を実行中です。完了までお待ちください。', 'warning');
+        return;
+      }
+
       if (!videoFileUrl) {
         showNotification('動画ファイルがありません', 'error');
         return;
@@ -2249,6 +2274,12 @@
         return;
       }
 
+      isSavingAnalyzedVideo = true;
+      const analyzedVideoButton = document.getElementById('btn-save-analyzed-video');
+      if (analyzedVideoButton) {
+        analyzedVideoButton.disabled = true;
+      }
+      syncPhoneQuickActions();
       try {
         const {
           blob,
@@ -2273,6 +2304,12 @@
         }
         console.error('[Save Analyzed Video] Error:', error);
         showNotification('解析動画の保存に失敗しました: ' + error.message, 'error');
+      } finally {
+        isSavingAnalyzedVideo = false;
+        if (analyzedVideoButton) {
+          analyzedVideoButton.disabled = !videoFileUrl || analysisData.length === 0 || isGeneratingAnalyzedPreview;
+        }
+        syncPhoneQuickActions();
       }
     }
 

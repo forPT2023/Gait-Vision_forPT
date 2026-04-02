@@ -6,6 +6,7 @@ import {
   cancelScheduledMediaWork,
   clearLoadedVideoState,
   findClosestAnalysisPoint,
+  findInterpolatedAnalysisPoint,
   getPostAnalysisStopPlan,
   getAnalysisFrameGate,
   getMediaPipeTimestamp,
@@ -30,6 +31,17 @@ test('getMediaPipeTimestamp uses video currentTime for file playback', () => {
   );
 });
 
+test('getMediaPipeTimestamp safely normalizes invalid video currentTime values', () => {
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: false, currentTime: Number.NaN, now: () => 9999 }),
+    0
+  );
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: false, currentTime: -2, now: () => 9999 }),
+    0
+  );
+});
+
 test('getSourceMode resolves camera, video, and idle states', () => {
   assert.equal(getSourceMode({ hasStream: true, videoFileUrl: null }), 'camera');
   assert.equal(getSourceMode({ hasStream: false, videoFileUrl: 'blob:video' }), 'video');
@@ -45,6 +57,70 @@ test('findClosestAnalysisPoint returns the nearest elapsed data point', () => {
 
   assert.deepEqual(findClosestAnalysisPoint(points, 1400), points[1]);
   assert.deepEqual(findClosestAnalysisPoint(points, 1800), points[2]);
+});
+
+test('findClosestAnalysisPoint safely handles non-array and non-finite elapsed inputs', () => {
+  const points = [
+    { elapsedMs: 100, value: 'a' },
+    { elapsedMs: 200, value: 'b' }
+  ];
+
+  assert.equal(findClosestAnalysisPoint(null, 150), null);
+  assert.deepEqual(findClosestAnalysisPoint(points, Number.NaN), points[0]);
+});
+
+test('findInterpolatedAnalysisPoint linearly interpolates landmarks between frames', () => {
+  const points = [
+    {
+      elapsedMs: 0,
+      timestamp: 1000,
+      landmarks: [{ x: 0.1, y: 0.2, z: 0 }, { x: 0.3, y: 0.4, z: 0 }],
+      worldLandmarks: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }]
+    },
+    {
+      elapsedMs: 1000,
+      timestamp: 2000,
+      landmarks: [{ x: 0.5, y: 0.6, z: 0.2 }, { x: 0.7, y: 0.8, z: 0.2 }],
+      worldLandmarks: [{ x: 2, y: 2, z: 2 }, { x: 3, y: 3, z: 3 }]
+    }
+  ];
+
+  const interpolated = findInterpolatedAnalysisPoint(points, 500);
+  assert.ok(interpolated);
+  assert.equal(interpolated.elapsedMs, 500);
+  assert.ok(Math.abs(interpolated.landmarks[0].x - 0.3) < 1e-9);
+  assert.ok(Math.abs(interpolated.landmarks[0].y - 0.4) < 1e-9);
+  assert.equal(interpolated.timestamp, 1500);
+  assert.equal(interpolated.worldLandmarks[0].x, 1);
+  assert.equal(interpolated.worldLandmarks[1].z, 2);
+});
+
+test('findInterpolatedAnalysisPoint falls back to nearest point when interpolation is unavailable', () => {
+  const points = [
+    { elapsedMs: 0, landmarks: [{ x: 0, y: 0 }] },
+    { elapsedMs: 1000, landmarks: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }
+  ];
+
+  assert.deepEqual(findInterpolatedAnalysisPoint(points, 450), points[0]);
+});
+
+test('findInterpolatedAnalysisPoint clamps out-of-range elapsed values to boundary points', () => {
+  const points = [
+    { elapsedMs: 100, marker: 'start', landmarks: [{ x: 0, y: 0 }] },
+    { elapsedMs: 500, marker: 'end', landmarks: [{ x: 1, y: 1 }] }
+  ];
+
+  assert.deepEqual(findInterpolatedAnalysisPoint(points, 50), points[0]);
+  assert.deepEqual(findInterpolatedAnalysisPoint(points, 800), points[1]);
+});
+
+test('findInterpolatedAnalysisPoint falls back safely for non-finite elapsed values', () => {
+  const points = [
+    { elapsedMs: 0, marker: 'start', landmarks: [{ x: 0, y: 0 }] },
+    { elapsedMs: 1000, marker: 'end', landmarks: [{ x: 1, y: 1 }] }
+  ];
+
+  assert.deepEqual(findInterpolatedAnalysisPoint(points, Number.NaN), points[0]);
 });
 
 test('cancelScheduledMediaWork cancels frame callbacks and animation frames', () => {
