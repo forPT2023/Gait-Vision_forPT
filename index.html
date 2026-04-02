@@ -328,7 +328,6 @@
           <button id="btn-phone-stage-save" class="success-action">🎥 解析動画を保存</button>
           <button id="btn-phone-stage-report" class="accent-action">📄 レポートを閲覧</button>
           <button id="btn-phone-stage-csv" class="muted-action">📊 CSVを出力</button>
-          <button id="btn-phone-stage-export" class="muted-action">📦 全データを出力</button>
           <button id="btn-phone-stage-settings" class="warn-action">🗑️ データ管理</button>
           <button id="btn-phone-stage-back" class="warn-action">↩️ ① 取得に戻る</button>
         </div>
@@ -410,10 +409,6 @@
       <div class="tooltip phone-results-only">
         <button id="btn-reset-charts" class="btn-secondary">🔄 波形リセット</button>
         <span class="tooltiptext">グラフの波形をクリア</span>
-      </div>
-      <div class="tooltip phone-results-only">
-        <button id="btn-export" class="btn-secondary">📦 エクスポート</button>
-        <span class="tooltiptext">全データをJSON形式でバックアップ</span>
       </div>
       <div class="tooltip">
         <button id="btn-settings" class="btn-secondary">🗑️ データ削除</button>
@@ -506,7 +501,7 @@
     import { setupInstallPrompt } from './src/pwa/install.js';
     import { registerAppServiceWorker } from './src/pwa/serviceWorker.js';
     import { createSessionStorage } from './src/storage/db.js';
-    import { buildAnalysisCsv, buildCsvExportFilename, buildPdfReportFilename, buildSessionExport, createBackupFilename, downloadBlobFile, downloadJson } from './src/storage/export.js';
+    import { buildAnalysisCsv, buildCsvExportFilename, buildPdfReportFilename, downloadBlobFile } from './src/storage/export.js';
     import { buildCameraConstraints, listAvailableVideoInputs, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from './src/video/camera.js';
     import { calculateCanvasLayout, getDefaultVideoAspectRatio, resolveDisplaySourceDimensions, syncCanvasDisplaySize } from './src/video/display.js';
     import { buildAnalyzedVideoFilename, buildRecordingFilename, buildRecordingMetadata, closeSaveRecordingDialog, createCanvasRecordingSession, downloadBlob, formatRecordingInfoText, resetRecordedVideoState, showSaveRecordingDialog as showRecordingSaveDialog } from './src/video/recording.js';
@@ -806,35 +801,6 @@
       } catch (error) {
         console.error('Clear data error:', error);
         showNotification('削除エラー: ' + error.message, 'error');
-      }
-    }
-
-    async function exportAllData() {
-      try {
-        const { storedCount, decryptedSessions } = await sessionStorage.exportSessions();
-
-        if (storedCount === 0) {
-          showNotification('エクスポートするデータがありません', 'error');
-          return;
-        }
-
-        if (decryptedSessions.length === 0) {
-          showNotification('データの復号化に失敗しました', 'error');
-          return;
-        }
-
-        const exportData = buildSessionExport({ sessions: decryptedSessions });
-        downloadJson({
-          documentRef: document,
-          URLRef: URL,
-          payload: exportData,
-          filename: createBackupFilename()
-        });
-
-        showNotification(`${decryptedSessions.length}件のセッションをエクスポートしました`, 'success');
-      } catch (error) {
-        console.error('Export error:', error);
-        showNotification('エクスポートエラー: ' + error.message, 'error');
       }
     }
 
@@ -2743,14 +2709,12 @@
     document.getElementById('btn-phone-stage-save').addEventListener('click', saveAnalyzedVideo);
     document.getElementById('btn-phone-stage-report').addEventListener('click', generateReport);
     document.getElementById('btn-phone-stage-csv').addEventListener('click', exportCSV);
-    document.getElementById('btn-phone-stage-export').addEventListener('click', exportAllData);
     document.getElementById('btn-phone-stage-settings').addEventListener('click', openDataSettingsMenu);
     document.getElementById('btn-phone-stage-back').addEventListener('click', () => {
       phoneFlowView = 'capture';
       syncDeviceModeUi();
     });
     document.getElementById('btn-reset-charts').addEventListener('click', () => chartController.resetCharts());
-    document.getElementById('btn-export').addEventListener('click', exportAllData);
     document.getElementById('btn-settings').addEventListener('click', openDataSettingsMenu);
 
     setupInstallPrompt({
