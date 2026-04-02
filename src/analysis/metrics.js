@@ -88,10 +88,22 @@ export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT,
     z: (previousWorldLandmarks[LM.LEFT_HIP].z + previousWorldLandmarks[LM.RIGHT_HIP].z) / 2
   };
 
-  const displacementXZ = Math.sqrt(
+  const hipDisplacementXZ = Math.sqrt(
     Math.pow(hipMid.x - prevHipMid.x, 2) +
     Math.pow(hipMid.z - prevHipMid.z, 2)
   );
+  const leftAnkleDisplacementXZ = Math.sqrt(
+    Math.pow(worldLandmarks[LM.LEFT_ANKLE].x - previousWorldLandmarks[LM.LEFT_ANKLE].x, 2) +
+    Math.pow(worldLandmarks[LM.LEFT_ANKLE].z - previousWorldLandmarks[LM.LEFT_ANKLE].z, 2)
+  );
+  const rightAnkleDisplacementXZ = Math.sqrt(
+    Math.pow(worldLandmarks[LM.RIGHT_ANKLE].x - previousWorldLandmarks[LM.RIGHT_ANKLE].x, 2) +
+    Math.pow(worldLandmarks[LM.RIGHT_ANKLE].z - previousWorldLandmarks[LM.RIGHT_ANKLE].z, 2)
+  );
+  const ankleDisplacementXZ = (leftAnkleDisplacementXZ + rightAnkleDisplacementXZ) / 2;
+  const displacementXZ = hipDisplacementXZ > 1e-4
+    ? hipDisplacementXZ
+    : ankleDisplacementXZ * 0.35;
 
   const shoulderWidth = Math.sqrt(
     Math.pow(worldLandmarks[LM.LEFT_SHOULDER].x - worldLandmarks[LM.RIGHT_SHOULDER].x, 2) +
@@ -113,11 +125,11 @@ export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT,
   const speedMps = scaledDisplacement / (deltaT / 1000);
 
   if (Math.random() < 0.01) {
-    logger.log?.('[Speed] displacementXZ:', displacementXZ.toFixed(5), '| bodyScale:', bodyScale.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
+    logger.log?.('[Speed] hipDispXZ:', hipDisplacementXZ.toFixed(5), '| ankleDispXZ:', ankleDisplacementXZ.toFixed(5), '| usedDispXZ:', displacementXZ.toFixed(5), '| bodyScale:', bodyScale.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
   }
 
   if (Number.isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
-    logger.warn?.('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | displacementXZ:', displacementXZ.toFixed(4), '| bodyScale:', bodyScale.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
+    logger.warn?.('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | hipDispXZ:', hipDisplacementXZ.toFixed(4), '| ankleDispXZ:', ankleDisplacementXZ.toFixed(4), '| usedDispXZ:', displacementXZ.toFixed(4), '| bodyScale:', bodyScale.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
     return Math.max(0, Math.min(5, speedMps));
   }
 

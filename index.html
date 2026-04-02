@@ -345,7 +345,7 @@
       <div class="phone-preview-card phone-results-only">
         <h3>✨ 解析プレビュー（マーカー重畳）</h3>
         <p>解析終了後に自動生成されるプレビュー動画です。スクロールしながら結果を確認できます。</p>
-        <video id="phone-analyzed-preview" controls playsinline webkit-playsinline preload="metadata"></video>
+        <video id="phone-analyzed-preview" playsinline webkit-playsinline preload="metadata"></video>
         <span id="phone-analyzed-preview-empty" class="phone-preview-empty">解析後のプレビュー動画はまだありません。解析を開始してください。</span>
       </div>
     </div>
@@ -713,7 +713,7 @@
       canvasCtx.drawImage(sourceVideoElement, 0, 0, canvasElement.width, canvasElement.height);
 
       if (dataPoint?.landmarks?.length) {
-        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, true);
+        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false);
       }
     }
 
@@ -1055,16 +1055,29 @@
 
     // Gait analysis helpers moved to src/analysis/*.js
 
-    function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = true) {
+    function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = false) {
       if (!landmarks || landmarks.length === 0) return;
       const drawingUtils = new DrawingUtils(canvasCtx);
       drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, { color: '#00ffff', lineWidth: 3 });
       drawingUtils.drawLandmarks(landmarks, { radius: 4, color: '#ffffff', fillColor: '#ffffff' });
       const keyJoints = [
+        LM.NOSE,
+        LM.LEFT_EYE_INNER,
+        LM.LEFT_EYE,
+        LM.LEFT_EYE_OUTER,
+        LM.RIGHT_EYE_INNER,
+        LM.RIGHT_EYE,
+        LM.RIGHT_EYE_OUTER,
+        LM.LEFT_EAR,
+        LM.RIGHT_EAR,
+        LM.MOUTH_LEFT,
+        LM.MOUTH_RIGHT,
         LM.LEFT_SHOULDER,
         LM.RIGHT_SHOULDER,
         LM.LEFT_ELBOW,
         LM.RIGHT_ELBOW,
+        LM.LEFT_WRIST,
+        LM.RIGHT_WRIST,
         LM.LEFT_HIP,
         LM.RIGHT_HIP,
         LM.LEFT_KNEE,
@@ -1202,7 +1215,7 @@
               if (results.landmarks && results.landmarks.length > 0) {
                 const landmarks = results.landmarks[0];
                 const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
-                drawEnhancedLandmarks(landmarks, worldLandmarks, true);
+                drawEnhancedLandmarks(landmarks, worldLandmarks, false);
 
                 const deltaT = (previewPrevMpTimestamp != null) ? (mpTimestamp - previewPrevMpTimestamp) : 0;
 
@@ -1732,7 +1745,7 @@
           if (results.landmarks && results.landmarks.length > 0) {
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
-            drawEnhancedLandmarks(landmarks, worldLandmarks, true);
+            drawEnhancedLandmarks(landmarks, worldLandmarks, false);
 
             const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
             const angles = worldLandmarks ? calcJointAngles(worldLandmarks) : null;
