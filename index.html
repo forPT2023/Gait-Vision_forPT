@@ -1111,46 +1111,41 @@
     // ctx / canvasW / canvasH を省略するとメイン canvas を使う（通常の解析描画）。
     // エクスポート時はオフスクリーン canvas の値を渡すことで画面を汚さない。
     // videoW / videoH は MediaPipe がランドマーク正規化に使った動画の実寸法。
-    // landmark.x/y は videoW/H に対する 0–1 の値であり、drawImage が video 全体を
-    // (dstW × dstH) に引き伸ばして描くため、キャンバス上の座標は
-    //   x_canvas = landmark.x * dstW  (= canvasW の場合は canvasW と一致)
-    // となる。drawImage の dst サイズ = キャンバスサイズ の場合は canvasW/H で十分だが、
-    // letterbox 描画など dst != canvas の場合に備え videoW/H を受け取れるようにする。
+    // drawImage(video, 0, 0, canvasW, canvasH) で動画全体をキャンバス全体に引き伸ばして
+    // いるため、ランドマーク正規化座標をそのまま canvasW/H 倍すれば正しい位置になる。
     function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = false,
                                    ctx = canvasCtx, canvasW = canvasElement.width, canvasH = canvasElement.height,
                                    videoW = 0, videoH = 0) {
       if (!landmarks || landmarks.length === 0) return;
 
-      // ── ランドマーク → キャンバス座標の変換スケール ───────────────────────
-      // drawImage(video, 0, 0, canvasW, canvasH) で動画全体を canvasW×canvasH に
-      // 引き伸ばしているため、正規化座標をそのまま canvasW/H 倍すれば正しい位置になる。
-      // videoW/H が指定されていれば、動画内位置 → キャンバス内位置 のスケールを
-      // 明示的に計算する（将来の letterbox 対応や寸法不一致のデバッグ用）。
-      const scaleX = (videoW > 0 && canvasW > 0) ? canvasW / videoW * videoW : canvasW;
-      const scaleY = (videoH > 0 && canvasH > 0) ? canvasH / videoH * videoH : canvasH;
-      // ↑ videoW/H が有効な場合も現時点では canvasW/H と同値になる
-      //   （drawImage が全体をキャンバスサイズに引き伸ばすため）
+      // ランドマーク正規化座標 (0–1) → キャンバスピクセル座標
+      // drawImage が video 全体を (canvasW × canvasH) に引き伸ばして描いているため
+      // scaleX = canvasW, scaleY = canvasH で正しく一致する。
+      const scaleX = canvasW;
+      const scaleY = canvasH;
 
-      // ── 骨格接続線：下半身＋胴体のみ（全身35本→11本に絞り描画コストを削減） ──
-      // MediaPipe の POSE_CONNECTIONS には顔・腕・指の接続も含まれるが、
-      // 歩行解析では下半身のみ必要。Canvas2D の lineTo で直接描く方が
-      // DrawingUtils (WebGL ベース) より軽い。
-      const LOWER_CONNECTIONS = [
-        [23, 24], // 左右股関節
-        [23, 25], [24, 26], // 股関節-膝
-        [25, 27], [26, 28], // 膝-足首
-        [27, 29], [28, 30], // 足首-踵
-        [29, 31], [30, 32], // 踵-つま先
-        [27, 31], [28, 32]  // 足首-つま先（足底線）
+      // ── 全身骨格接続線（MediaPipe POSE_CONNECTIONS 相当・35本） ────────────
+      // Canvas2D の lineTo で直接描画（DrawingUtils/WebGL より軽量）。
+      const ALL_CONNECTIONS = [
+        // 顔
+        [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],
+        // 上半身
+        [11,12],[11,13],[13,15],[15,17],[15,19],[15,21],[17,19],
+        [12,14],[14,16],[16,18],[16,20],[16,22],[18,20],
+        // 体幹
+        [11,23],[12,24],[23,24],
+        // 下半身
+        [23,25],[24,26],[25,27],[26,28],
+        [27,29],[28,30],[29,31],[30,32],[27,31],[28,32]
       ];
       ctx.save();
       ctx.strokeStyle = '#00ffff';
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
-      LOWER_CONNECTIONS.forEach(([a, b]) => {
+      ALL_CONNECTIONS.forEach(([a, b]) => {
         const lmA = landmarks[a];
         const lmB = landmarks[b];
-        if (lmA && lmB && lmA.visibility > 0.3 && lmB.visibility > 0.3) {
+        if (lmA && lmB && (lmA.visibility ?? 1) > 0.3 && (lmB.visibility ?? 1) > 0.3) {
           ctx.beginPath();
           ctx.moveTo(lmA.x * scaleX, lmA.y * scaleY);
           ctx.lineTo(lmB.x * scaleX, lmB.y * scaleY);
@@ -1159,17 +1154,18 @@
       });
       ctx.restore();
 
-      // ── キー関節：下半身のみ緑円で描画（顔・腕は含まない） ─────────────────
+      // ── キー関節：緑円（下半身＋肩） ────────────────────────────────────────
       const keyJoints = [
-        LM.LEFT_HIP,    LM.RIGHT_HIP,
-        LM.LEFT_KNEE,   LM.RIGHT_KNEE,
-        LM.LEFT_ANKLE,  LM.RIGHT_ANKLE,
-        LM.LEFT_HEEL,   LM.RIGHT_HEEL
+        LM.LEFT_SHOULDER,  LM.RIGHT_SHOULDER,
+        LM.LEFT_HIP,       LM.RIGHT_HIP,
+        LM.LEFT_KNEE,      LM.RIGHT_KNEE,
+        LM.LEFT_ANKLE,     LM.RIGHT_ANKLE,
+        LM.LEFT_HEEL,      LM.RIGHT_HEEL
       ];
       ctx.save();
       keyJoints.forEach(idx => {
         const lm = landmarks[idx];
-        if (lm && lm.visibility > 0.3) {
+        if (lm && (lm.visibility ?? 1) > 0.3) {
           const x = lm.x * scaleX;
           const y = lm.y * scaleY;
           ctx.beginPath();
@@ -1186,10 +1182,10 @@
       if (showLabels && worldLandmarks && worldLandmarks.length > 0) {
         const angles = calcJointAngles(worldLandmarks);
         if (angles) {
-          drawAngleLabel(landmarks[LM.LEFT_KNEE], '膝: ' + Math.round(angles.leftKnee) + '°', ctx, scaleX, scaleY);
+          drawAngleLabel(landmarks[LM.LEFT_KNEE],  '膝: ' + Math.round(angles.leftKnee)  + '°', ctx, scaleX, scaleY);
           drawAngleLabel(landmarks[LM.RIGHT_KNEE], '膝: ' + Math.round(angles.rightKnee) + '°', ctx, scaleX, scaleY);
-          drawAngleLabel(landmarks[LM.LEFT_HIP], '股: ' + Math.round(angles.leftHip) + '°', ctx, scaleX, scaleY);
-          drawAngleLabel(landmarks[LM.RIGHT_HIP], '股: ' + Math.round(angles.rightHip) + '°', ctx, scaleX, scaleY);
+          drawAngleLabel(landmarks[LM.LEFT_HIP],   '股: ' + Math.round(angles.leftHip)   + '°', ctx, scaleX, scaleY);
+          drawAngleLabel(landmarks[LM.RIGHT_HIP],  '股: ' + Math.round(angles.rightHip)  + '°', ctx, scaleX, scaleY);
         }
       }
     }
@@ -1867,6 +1863,25 @@
           if (results.landmarks && results.landmarks.length > 0) {
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
+
+            // ── マーカーズレ診断ログ（最初の3フレームのみ） ────────────────
+            // landmark座標は videoElement で detectForVideo した際の
+            // 内部処理サイズ (= videoWidth × videoHeight) に対する正規化値。
+            // drawImage の dst = canvasElement.width/height であるため、
+            // scaleX = canvasElement.width / videoWidth が一致の条件。
+            if (frameCount <= 3) {
+              const lmHip = landmarks[LM.LEFT_HIP];
+              console.log('[Align] frame', frameCount,
+                '| videoSize:', videoElement.videoWidth, 'x', videoElement.videoHeight,
+                '| canvasSize:', canvasElement.width, 'x', canvasElement.height,
+                '| videoAR:', (videoElement.videoWidth / videoElement.videoHeight).toFixed(4),
+                '| canvasAR:', (canvasElement.width / canvasElement.height).toFixed(4),
+                '| arMatch:', Math.abs(videoElement.videoWidth / videoElement.videoHeight - canvasElement.width / canvasElement.height) < 0.001 ? 'OK' : 'MISMATCH ⚠',
+                lmHip ? '| leftHip normalized: (' + lmHip.x.toFixed(3) + ', ' + lmHip.y.toFixed(3) + ')'
+                       + ' → canvas px: (' + Math.round(lmHip.x * canvasElement.width) + ', ' + Math.round(lmHip.y * canvasElement.height) + ')' : ''
+              );
+            }
+
             drawEnhancedLandmarks(landmarks, worldLandmarks, false);
 
             const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
