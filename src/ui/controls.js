@@ -74,9 +74,15 @@ export function disableRecordButton(recordButton) {
 export function enableAnalysisExportButtons({
   csvButton,
   reportButton,
-  hasAnalysisData
+  analyzedVideoButton = null,
+  hasAnalysisData,
+  hasVideoSource = false
 }) {
   if (!hasAnalysisData) return;
   csvButton.disabled = false;
   reportButton.disabled = false;
+  // 解析動画ボタンはビデオファイルモードかつ解析データがある場合のみ有効化する
+  if (analyzedVideoButton && hasVideoSource) {
+    analyzedVideoButton.disabled = false;
+  }
 }

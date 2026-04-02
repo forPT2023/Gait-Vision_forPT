@@ -419,14 +419,23 @@ test('waitForVideoLoad handles elements without addEventListener/removeEventList
 
 test('startVideoPlaybackForAnalysis resets playback and stamps the epoch base', async () => {
   let playCalled = false;
+  // Simulate a video element that fires 'playing' after play() resolves.
+  const listeners = {};
+  const videoElement = {
+    currentTime: 42,
+    ended: false,
+    paused: true,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
+    async play() {
+      playCalled = true;
+      this.paused = false;
+      // Fire 'playing' synchronously to simulate browser behaviour.
+      listeners['playing']?.();
+    }
+  };
   const result = await startVideoPlaybackForAnalysis({
-    videoElement: {
-      currentTime: 42,
-      ended: false,
-      async play() {
-        playCalled = true;
-      }
-    },
+    videoElement,
     logger: { log() {} },
     now: () => 123456
   });
@@ -435,7 +444,9 @@ test('startVideoPlaybackForAnalysis resets playback and stamps the epoch base', 
   assert.deepEqual(result, { videoEpochBaseMs: 123456 });
 });
 
-test('startVideoPlaybackForAnalysis reloads ended videos before playing', async () => {
+test('startVideoPlaybackForAnalysis resets currentTime and plays ended videos without calling load()', async () => {
+  // load() must NOT be called: it resets the media pipeline and causes
+  // a second canplay/loadeddata cycle which makes the video appear to play twice.
   const calls = [];
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (fn) => {
@@ -444,14 +455,23 @@ test('startVideoPlaybackForAnalysis reloads ended videos before playing', async 
   };
 
   try {
+    const listeners = {};
     const videoElement = {
       currentTime: 8,
       ended: true,
+      paused: true,
+      addEventListener(event, fn) { listeners[event] = fn; },
+      removeEventListener(event) { delete listeners[event]; },
       load() {
         calls.push('load');
       },
-      async play() {
+      play() {
         calls.push('play');
+        this.ended = false;
+        this.paused = false;
+        // Fire 'playing' synchronously to simulate the browser clearing ended state.
+        listeners['playing']?.();
+        return Promise.resolve();
       }
     };
 
@@ -462,7 +482,8 @@ test('startVideoPlaybackForAnalysis reloads ended videos before playing', async 
     });
 
     assert.equal(videoElement.currentTime, 0);
-    assert.deepEqual(calls, ['load', 'play']);
+    // load() must not appear in the call sequence
+    assert.deepEqual(calls, ['play']);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
@@ -470,15 +491,21 @@ test('startVideoPlaybackForAnalysis reloads ended videos before playing', async 
 
 test('startVideoPlaybackForAnalysis ignores duplicate starts while play() is still pending', async () => {
   let resolvePlay;
+  let resolveListenerPlaying;
   let playCalls = 0;
+  const listeners = {};
   const videoElement = {
-    currentTime: 5,
+    currentTime: 0,   // already at start so the seek-delay branch is skipped
     ended: false,
     paused: true,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
     play() {
       playCalls += 1;
       return new Promise((resolve) => {
         resolvePlay = resolve;
+        // Provide a way for the test to fire 'playing' after play resolves.
+        resolveListenerPlaying = () => { listeners['playing']?.(); };
       });
     }
   };
@@ -497,7 +524,9 @@ test('startVideoPlaybackForAnalysis ignores duplicate starts while play() is sti
   assert.equal(playCalls, 1);
   assert.equal(secondStart.playbackAlreadyStarting, true);
 
+  // Resolve play() then fire 'playing' so firstStart can settle.
   resolvePlay();
+  resolveListenerPlaying();
   await firstStart;
 });
 

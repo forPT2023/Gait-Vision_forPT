@@ -47,6 +47,8 @@ test('buildReportHtml renders common header and quality summary fields', () => {
       trunk: { normalMin: 0, normalMax: 10 },
       leftKnee: { normalMin: 0, normalMax: 80 },
       rightKnee: { normalMin: 0, normalMax: 80 },
+      leftAnkle: { normalMin: 60, normalMax: 120 },
+      rightAnkle: { normalMin: 60, normalMax: 120 },
       pelvis: { normalMin: 0, normalMax: 10 },
       kneeDiff: { threshold: 10 },
       hipDiff: { threshold: 10 },
@@ -56,10 +58,13 @@ test('buildReportHtml renders common header and quality summary fields', () => {
 
   assert.ok(html.includes('セッションID'));
   assert.ok(html.includes('session-PT-0001-1'));
-  assert.ok(html.includes('品質サマリー: capture=video'));
+  assert.ok(html.includes('解析品質'));
   assert.ok(html.includes('レポート版'));
   assert.ok(html.includes('test-version'));
   assert.ok(html.includes('歩行速度'));
+  // 前額面では関節角度詳細テーブルと関節角度比較グラフを表示しない
+  assert.ok(!html.includes('関節角度詳細'), '前額面レポートに関節角度詳細テーブルが含まれてはならない');
+  assert.ok(!html.includes('report-knee-chart'), '前額面レポートにkneeチャートが含まれてはならない');
 });
 
 test('buildReportHtml renders 未計算 for unavailable metrics', () => {
@@ -99,6 +104,8 @@ test('buildReportHtml renders 未計算 for unavailable metrics', () => {
       trunk: { normalMin: 0, normalMax: 10 },
       leftKnee: { normalMin: 0, normalMax: 80 },
       rightKnee: { normalMin: 0, normalMax: 80 },
+      leftAnkle: { normalMin: 60, normalMax: 120 },
+      rightAnkle: { normalMin: 60, normalMax: 120 },
       pelvis: { normalMin: 0, normalMax: 10 },
       kneeDiff: { threshold: 10 },
       hipDiff: { threshold: 10 },
@@ -108,6 +115,9 @@ test('buildReportHtml renders 未計算 for unavailable metrics', () => {
 
   assert.ok(html.includes('未計算'));
   assert.ok(html.includes('⚪ 未計算'));
+  // 矢状面では関節角度詳細テーブルを表示する（棒グラフは削除済み）
+  assert.ok(html.includes('関節角度詳細'), '矢状面レポートに関節角度詳細テーブルが含まれる必要がある');
+  assert.ok(!html.includes('report-knee-chart'), '矢状面レポートに棒グラフは不要');
 });
 
 test('buildPdfImageLayout creates multipage placements for tall canvases', () => {

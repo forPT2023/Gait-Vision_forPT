@@ -6,6 +6,7 @@ import {
   calcAngle3D,
   calcJointAngles,
   calcPelvicTilt,
+  calcStepSymmetry,
   calcSymmetryIndex,
   calcTrunkAngle,
   calcWalkingSpeed,
@@ -167,4 +168,36 @@ test('detectGaitEvent emits a left heel strike when threshold conditions are met
 
 test('ema returns a weighted moving average', () => {
   assert.equal(ema(10, 20, 0.2), 12);
+});
+
+test('calcStepSymmetry returns 100 when fewer than 4 events', () => {
+  assert.equal(calcStepSymmetry([]), 100);
+  assert.equal(calcStepSymmetry([{ timestamp: 0 }, { timestamp: 500 }]), 100);
+});
+
+test('calcStepSymmetry returns high symmetry for perfectly even intervals', () => {
+  // 4 events with equal 500ms intervals → perfectly symmetric
+  const events = [
+    { timestamp: 0 },
+    { timestamp: 500 },
+    { timestamp: 1000 },
+    { timestamp: 1500 },
+    { timestamp: 2000 }
+  ];
+  const result = calcStepSymmetry(events);
+  assert.ok(result >= 99, `Expected >= 99, got ${result}`);
+});
+
+test('calcStepSymmetry returns low symmetry for very uneven intervals', () => {
+  // alternating 200ms / 800ms intervals → asymmetric
+  const events = [
+    { timestamp: 0 },
+    { timestamp: 200 },
+    { timestamp: 1000 },
+    { timestamp: 1200 },
+    { timestamp: 2000 },
+    { timestamp: 2200 }
+  ];
+  const result = calcStepSymmetry(events);
+  assert.ok(result < 70, `Expected < 70 for uneven steps, got ${result}`);
 });

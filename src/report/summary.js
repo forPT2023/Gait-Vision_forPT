@@ -43,8 +43,8 @@ export function evaluateDifferenceStatus(diff, threshold = 10) {
   return { tone: 'alert', label: '🔴 左右差大' };
 }
 
-function formatRuleComment({ ruleId, message }) {
-  return `[${ruleId}] ${message}`;
+function formatRuleComment({ message }) {
+  return message;
 }
 
 function addRuleComment(comments, rule) {
@@ -180,7 +180,11 @@ export function createReportSummary({ analysisData, analysisPlane, currentPlane,
     thresholds: REPORT_THRESHOLDS[reportPlane]
   };
 
-  summary.qualitySummary = `capture=${summary.captureMode} | valid=${summary.validFrames}/${summary.totalProcessedFrames} (${(summary.validFrameRatio * 100).toFixed(1)}%) | missing=${(summary.missingLandmarkRatio * 100).toFixed(1)}% | gait-events=${summary.gaitEventDetected ? 'available' : 'not-detected'} | speed=${summary.speedPolicyLabel}`;
+  const captureModeLabel = summary.captureMode === 'video' ? '動画ファイル' : 'カメラ';
+  const validPct = (summary.validFrameRatio * 100).toFixed(1);
+  const missingPct = (summary.missingLandmarkRatio * 100).toFixed(1);
+  const gaitLabel = summary.gaitEventDetected ? '検出あり' : '未検出';
+  summary.qualitySummary = `取得: ${captureModeLabel} | 有効フレーム: ${summary.validFrames}/${summary.totalProcessedFrames} (${validPct}%) | 姿勢検出失敗: ${missingPct}% | 歩行イベント: ${gaitLabel}`;
   summary.comments = buildComments(summary);
   return summary;
 }

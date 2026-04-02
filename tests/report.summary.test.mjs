@@ -97,10 +97,11 @@ test('createReportSummary builds a frontal summary with session-based date', () 
   assert.equal(summary.speedPolicyLabel, 'estimated');
   assert.equal(summary.metricAvailability.speed, true);
   assert.equal(summary.metricAvailability.leftKnee, true);
-  assert.ok(summary.qualitySummary.includes('capture=video'));
+  assert.ok(summary.qualitySummary.includes('動画ファイル'));
+  assert.ok(summary.qualitySummary.includes('有効フレーム'));
   assert.ok(summary.sessionDateLabel.includes('2026'));
-  assert.ok(summary.comments.some((comment) => comment.includes('[frontal.overall.good]')));
-  assert.ok(summary.comments.every((comment) => comment.startsWith('[')));
+  assert.ok(summary.comments.some((comment) => comment.includes('✅') || comment.includes('⚠️')));
+  assert.ok(summary.comments.every((comment) => !comment.startsWith('[')));
 });
 
 test('createReportSummary falls back to currentPlane and keeps sagittal diffs', () => {
@@ -120,10 +121,10 @@ test('createReportSummary falls back to currentPlane and keeps sagittal diffs', 
   assert.ok(summary.hipDiff >= 0);
   assert.ok(summary.ankleDiff >= 0);
   assert.ok(summary.comments.length >= 1);
-  assert.ok(summary.comments.every((comment) => comment.startsWith('[')));
+  assert.ok(summary.comments.every((comment) => !comment.startsWith('[')));
 });
 
-test('createReportSummary emits traceable rule ids for threshold-triggered comments', () => {
+test('createReportSummary emits threshold-triggered comments in Japanese without rule IDs', () => {
   const summary = createReportSummary({
     analysisData: [
       { elapsedMs: 0, speed: 0.5, cadence: 90, symmetry: 80, trunk: 18, pelvis: 0, leftKnee: 0, rightKnee: 0, leftHip: 0, rightHip: 0, leftAnkle: 0, rightAnkle: 0 }
@@ -135,10 +136,12 @@ test('createReportSummary emits traceable rule ids for threshold-triggered comme
     sessionTimestamp: Date.UTC(2026, 2, 23)
   });
 
-  assert.ok(summary.comments.some((comment) => comment.includes('[frontal.speed.slow]')));
-  assert.ok(summary.comments.some((comment) => comment.includes('[frontal.symmetry.low]')));
-  assert.ok(summary.comments.some((comment) => comment.includes('[frontal.trunk.elevated]')));
-  assert.ok(summary.comments.some((comment) => comment.includes('[frontal.cadence.low]')));
+  // コメントはルールIDを含まない日本語メッセージのみ
+  assert.ok(summary.comments.every((c) => !c.startsWith('[')));
+  assert.ok(summary.comments.some((c) => c.includes('歩行速度') && c.includes('遅い')));
+  assert.ok(summary.comments.some((c) => c.includes('対称性') && c.includes('低下')));
+  assert.ok(summary.comments.some((c) => c.includes('体幹') && c.includes('傾斜')));
+  assert.ok(summary.comments.some((c) => c.includes('ケイデンス') && c.includes('低')));
 });
 
 test('createReportSummary marks zero-only placeholder metrics as not computed', () => {
@@ -155,4 +158,46 @@ test('createReportSummary marks zero-only placeholder metrics as not computed', 
   assert.equal(summary.metricAvailability.leftKnee, false);
   assert.equal(summary.metricAvailability.rightKnee, false);
   assert.equal(summary.metricAvailability.pelvis, true);
+});
+
+test('createReportSummary does not emit sagittal speed/cadence comment rules (removed from sagittal)', () => {
+  const summary = createReportSummary({
+    analysisData: [
+      { elapsedMs: 0, speed: 0.5, cadence: 80, symmetry: 90, trunk: 5, pelvis: 5,
+        leftKnee: 40, rightKnee: 42, leftHip: 25, rightHip: 26, leftAnkle: 90, rightAnkle: 92 }
+    ],
+    analysisPlane: 'sagittal',
+    currentPlane: 'sagittal',
+    patientId: 'PT-0005',
+    stepCount: 4,
+    sessionTimestamp: Date.UTC(2026, 2, 23)
+  });
+
+  // 矢状面では歩行速度・ケイデンスのコメントは出力しない
+  assert.ok(!summary.comments.some((c) => c.includes('歩行速度') && c.includes('遅い')),
+    'sagittal should NOT emit slow speed comment');
+  assert.ok(!summary.comments.some((c) => c.includes('ケイデンス') && c.includes('低め')),
+    'sagittal should NOT emit low cadence comment');
+});
+
+test('createReportSummary includes ankle thresholds in sagittal summary', () => {
+  const summary = createReportSummary({
+    analysisData: [
+      { elapsedMs: 0, speed: 1.1, cadence: 112, symmetry: 95, trunk: 8, pelvis: 5,
+        leftKnee: 40, rightKnee: 42, leftHip: 25, rightHip: 26, leftAnkle: 90, rightAnkle: 110 }
+    ],
+    analysisPlane: 'sagittal',
+    currentPlane: 'sagittal',
+    patientId: 'PT-0006',
+    stepCount: 4,
+    sessionTimestamp: Date.UTC(2026, 2, 23)
+  });
+
+  assert.ok(summary.thresholds.leftAnkle, 'leftAnkle threshold should exist');
+  assert.ok(summary.thresholds.rightAnkle, 'rightAnkle threshold should exist');
+  assert.equal(summary.thresholds.leftAnkle.normalMin, 60);
+  assert.equal(summary.thresholds.leftAnkle.normalMax, 120);
+  // ankleDiff = |90 - 110| = 20, exceeds elevatedAbove:10 -> comment triggered
+  assert.ok(summary.comments.some((c) => c.includes('足関節') || c.includes('蹴り出し')),
+    'ankle diff elevated comment should appear');
 });

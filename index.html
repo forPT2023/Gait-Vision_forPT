@@ -208,9 +208,12 @@
     #orientation-warning .warning-content { text-align: center; color: white; }
     #orientation-warning .warning-icon { font-size: 4rem; margin-bottom: 1rem; }
     #orientation-warning h3 { font-size: 1.5rem; margin-bottom: 1rem; }
-    .notification { position: fixed; top: 1rem; right: 1rem; background: #1a1f2e; color: #e2e8f0; padding: 1rem 1.5rem; border-radius: 0.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.8); border: 1px solid #2d3748; z-index: 3000; animation: slideIn 0.3s ease-out; }
+    .notification { position: fixed; top: 1rem; right: 1rem; background: #1a1f2e; color: #e2e8f0; padding: 1rem 1.5rem; border-radius: 0.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.8); border: 1px solid #2d3748; z-index: 3000; animation: slideIn 0.3s ease-out; min-width: 220px; }
     .notification.error { background: #ef4444; }
     .notification.success { background: #10b981; }
+    .notification.persistent { }
+    .notification-progress-bar-wrap { height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
+    .notification-progress-bar { height: 100%; background: #38bdf8; border-radius: 2px; transition: width 0.3s linear; width: 0%; }
     @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
     #report-modal { position: fixed; top: 0; left: 0; width: 100%; height: var(--app-height, 100dvh); background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
     #report-modal.show { display: flex; }
@@ -478,10 +481,10 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
   <script type="module">
-    import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
+    import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
     import { LM, createInitialEmaValues } from './src/analysis/constants.js';
     import { buildAnalysisDataPoint, calculateCadenceFromEvents } from './src/analysis/session.js';
-    import { calcJointAngles, calcPelvicTilt, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema } from './src/analysis/metrics.js';
+    import { calcJointAngles, calcPelvicTilt, calcStepSymmetry, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema } from './src/analysis/metrics.js';
     import { buildStoredPatientIdState, hasStoredConsent, persistConsent, persistPatientId } from './src/app/bootstrap.js';
     import { buildSessionRecord } from './src/app/session.js';
     import { createInitialAnalysisState, createStartedAnalysisState } from './src/app/state.js';
@@ -531,6 +534,14 @@
     let patientId = '';
     let analysisStartEpochMs = null;
     let analysisStartMpTimestamp = null;
+    let analysisVideoStartMs = 0; // videoElement.currentTime (ms) at the first analysed frame.
+                                  // Used to align export elapsedMs with analysisData.elapsedMs.
+    // videoWidth / videoHeight reported by videoElement at the time analysis ran.
+    // Stored so the export pipeline can draw landmarks using the SAME reference
+    // dimensions the pose landmarker used for normalisation, even if exportVideoElement
+    // reports different dimensions (e.g. off-DOM element, different decoder path).
+    let analysisVideoWidth = 0;
+    let analysisVideoHeight = 0;
     let fpsCounter = 0;
     let fpsStartTime = performance.now();
     let analysisData = [];
@@ -553,6 +564,8 @@
     const RECORD_ACTION_COOLDOWN_MS = 800;
     let videoEpochBaseMs = null; // For Chart.js realtime x-axis in video mode
     let videoFrameCallbackHandle = null; // requestVideoFrameCallback handle (video mode)
+    let mpTimestampOffset = 0; // Offset added to video currentTime*1000 so MediaPipe always receives a monotonically increasing timestamp across multiple analysis runs on the same video file.
+    let lastAnalysisMpTimestamp = 0; // The last MediaPipe timestamp successfully passed to detectForVideo; used to compute mpTimestampOffset on the next run.
     let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     let deviceMode = 'desktop';
     let chartsVisibleOnPhone = false;
@@ -564,6 +577,9 @@
     const videoElement = document.getElementById('video-element');
     const canvasElement = document.getElementById('canvas-element');
     const canvasCtx = canvasElement.getContext('2d');
+    // DrawingUtils (WebGL ベース) は使用しない。
+    // 骨格線・関節円はすべてネイティブ Canvas2D API で描画することで、
+    // 毎フレームの WebGL コンテキスト生成コストを排除しかくつきを防ぐ。
     const fpsDisplay = document.getElementById('fps-display');
     const installButton = document.getElementById('btn-install-app');
     const cameraSelect = document.getElementById('camera-select');
@@ -626,6 +642,13 @@
       videoFrameCallbackHandle = nextState.videoFrameCallbackHandle;
       videoFileUrl = nextState.videoFileUrl;
       videoEpochBaseMs = nextState.videoEpochBaseMs;
+      // Reset MediaPipe timestamp offset when the video file is unloaded so the
+      // next video starts from timestamp 0 without a stale offset.
+      mpTimestampOffset = 0;
+      lastAnalysisMpTimestamp = 0;
+      analysisVideoStartMs = 0;
+      analysisVideoWidth = 0;
+      analysisVideoHeight = 0;
     }
 
     function revokePreviewUrl(url) {
@@ -694,7 +717,8 @@
       return getMediaPipeTimestamp({
         hasStream: !!videoElement.srcObject,
         currentTime: videoElement.currentTime,
-        now: () => performance.now()
+        now: () => performance.now(),
+        offset: mpTimestampOffset
       });
     }
 
@@ -863,6 +887,35 @@
         message,
         type: type || 'info'
       });
+    }
+
+    // 生成中など長時間処理向け：自動消去しない永続通知＋プログレスバーを返す
+    function showPersistentProgressNotification(message) {
+      const el = document.createElement('div');
+      el.className = 'notification persistent';
+      const textEl = document.createElement('div');
+      textEl.textContent = message;
+      el.appendChild(textEl);
+      const barWrap = document.createElement('div');
+      barWrap.className = 'notification-progress-bar-wrap';
+      const bar = document.createElement('div');
+      bar.className = 'notification-progress-bar';
+      barWrap.appendChild(bar);
+      el.appendChild(barWrap);
+      document.body.appendChild(el);
+      return {
+        setProgress(pct) {
+          bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+          textEl.textContent = message + '  ' + Math.round(pct) + '%';
+        },
+        finish(successMessage) {
+          el.remove();
+          showNotification(successMessage, 'success');
+        },
+        dismiss() {
+          el.remove();
+        }
+      };
     }
 
     function resetAnalysisOutputButtons() {
@@ -1055,74 +1108,104 @@
 
     // Gait analysis helpers moved to src/analysis/*.js
 
-    function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = false) {
+    // ctx / canvasW / canvasH を省略するとメイン canvas を使う（通常の解析描画）。
+    // エクスポート時はオフスクリーン canvas の値を渡すことで画面を汚さない。
+    // videoW / videoH は MediaPipe がランドマーク正規化に使った動画の実寸法。
+    // landmark.x/y は videoW/H に対する 0–1 の値であり、drawImage が video 全体を
+    // (dstW × dstH) に引き伸ばして描くため、キャンバス上の座標は
+    //   x_canvas = landmark.x * dstW  (= canvasW の場合は canvasW と一致)
+    // となる。drawImage の dst サイズ = キャンバスサイズ の場合は canvasW/H で十分だが、
+    // letterbox 描画など dst != canvas の場合に備え videoW/H を受け取れるようにする。
+    function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = false,
+                                   ctx = canvasCtx, canvasW = canvasElement.width, canvasH = canvasElement.height,
+                                   videoW = 0, videoH = 0) {
       if (!landmarks || landmarks.length === 0) return;
-      const drawingUtils = new DrawingUtils(canvasCtx);
-      drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, { color: '#00ffff', lineWidth: 3 });
-      drawingUtils.drawLandmarks(landmarks, { radius: 4, color: '#ffffff', fillColor: '#ffffff' });
-      const keyJoints = [
-        LM.NOSE,
-        LM.LEFT_EYE_INNER,
-        LM.LEFT_EYE,
-        LM.LEFT_EYE_OUTER,
-        LM.RIGHT_EYE_INNER,
-        LM.RIGHT_EYE,
-        LM.RIGHT_EYE_OUTER,
-        LM.LEFT_EAR,
-        LM.RIGHT_EAR,
-        LM.MOUTH_LEFT,
-        LM.MOUTH_RIGHT,
-        LM.LEFT_SHOULDER,
-        LM.RIGHT_SHOULDER,
-        LM.LEFT_ELBOW,
-        LM.RIGHT_ELBOW,
-        LM.LEFT_WRIST,
-        LM.RIGHT_WRIST,
-        LM.LEFT_HIP,
-        LM.RIGHT_HIP,
-        LM.LEFT_KNEE,
-        LM.RIGHT_KNEE,
-        LM.LEFT_ANKLE,
-        LM.RIGHT_ANKLE,
-        LM.LEFT_HEEL,
-        LM.RIGHT_HEEL
+
+      // ── ランドマーク → キャンバス座標の変換スケール ───────────────────────
+      // drawImage(video, 0, 0, canvasW, canvasH) で動画全体を canvasW×canvasH に
+      // 引き伸ばしているため、正規化座標をそのまま canvasW/H 倍すれば正しい位置になる。
+      // videoW/H が指定されていれば、動画内位置 → キャンバス内位置 のスケールを
+      // 明示的に計算する（将来の letterbox 対応や寸法不一致のデバッグ用）。
+      const scaleX = (videoW > 0 && canvasW > 0) ? canvasW / videoW * videoW : canvasW;
+      const scaleY = (videoH > 0 && canvasH > 0) ? canvasH / videoH * videoH : canvasH;
+      // ↑ videoW/H が有効な場合も現時点では canvasW/H と同値になる
+      //   （drawImage が全体をキャンバスサイズに引き伸ばすため）
+
+      // ── 骨格接続線：下半身＋胴体のみ（全身35本→11本に絞り描画コストを削減） ──
+      // MediaPipe の POSE_CONNECTIONS には顔・腕・指の接続も含まれるが、
+      // 歩行解析では下半身のみ必要。Canvas2D の lineTo で直接描く方が
+      // DrawingUtils (WebGL ベース) より軽い。
+      const LOWER_CONNECTIONS = [
+        [23, 24], // 左右股関節
+        [23, 25], [24, 26], // 股関節-膝
+        [25, 27], [26, 28], // 膝-足首
+        [27, 29], [28, 30], // 足首-踵
+        [29, 31], [30, 32], // 踵-つま先
+        [27, 31], [28, 32]  // 足首-つま先（足底線）
       ];
-      keyJoints.forEach(idx => {
-        if (landmarks[idx]) {
-          const x = landmarks[idx].x * canvasElement.width;
-          const y = landmarks[idx].y * canvasElement.height;
-          canvasCtx.beginPath();
-          canvasCtx.arc(x, y, 8, 0, 2 * Math.PI);
-          canvasCtx.fillStyle = '#00ff00';
-          canvasCtx.fill();
-          canvasCtx.strokeStyle = '#000000';
-          canvasCtx.lineWidth = 2;
-          canvasCtx.stroke();
+      ctx.save();
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      LOWER_CONNECTIONS.forEach(([a, b]) => {
+        const lmA = landmarks[a];
+        const lmB = landmarks[b];
+        if (lmA && lmB && lmA.visibility > 0.3 && lmB.visibility > 0.3) {
+          ctx.beginPath();
+          ctx.moveTo(lmA.x * scaleX, lmA.y * scaleY);
+          ctx.lineTo(lmB.x * scaleX, lmB.y * scaleY);
+          ctx.stroke();
         }
       });
+      ctx.restore();
+
+      // ── キー関節：下半身のみ緑円で描画（顔・腕は含まない） ─────────────────
+      const keyJoints = [
+        LM.LEFT_HIP,    LM.RIGHT_HIP,
+        LM.LEFT_KNEE,   LM.RIGHT_KNEE,
+        LM.LEFT_ANKLE,  LM.RIGHT_ANKLE,
+        LM.LEFT_HEEL,   LM.RIGHT_HEEL
+      ];
+      ctx.save();
+      keyJoints.forEach(idx => {
+        const lm = landmarks[idx];
+        if (lm && lm.visibility > 0.3) {
+          const x = lm.x * scaleX;
+          const y = lm.y * scaleY;
+          ctx.beginPath();
+          ctx.arc(x, y, 7, 0, 2 * Math.PI);
+          ctx.fillStyle = '#00ff00';
+          ctx.fill();
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      });
+      ctx.restore();
+
       if (showLabels && worldLandmarks && worldLandmarks.length > 0) {
         const angles = calcJointAngles(worldLandmarks);
         if (angles) {
-          drawAngleLabel(landmarks[LM.LEFT_KNEE], '膝: ' + Math.round(angles.leftKnee) + '°');
-          drawAngleLabel(landmarks[LM.RIGHT_KNEE], '膝: ' + Math.round(angles.rightKnee) + '°');
-          drawAngleLabel(landmarks[LM.LEFT_HIP], '股: ' + Math.round(angles.leftHip) + '°');
-          drawAngleLabel(landmarks[LM.RIGHT_HIP], '股: ' + Math.round(angles.rightHip) + '°');
+          drawAngleLabel(landmarks[LM.LEFT_KNEE], '膝: ' + Math.round(angles.leftKnee) + '°', ctx, scaleX, scaleY);
+          drawAngleLabel(landmarks[LM.RIGHT_KNEE], '膝: ' + Math.round(angles.rightKnee) + '°', ctx, scaleX, scaleY);
+          drawAngleLabel(landmarks[LM.LEFT_HIP], '股: ' + Math.round(angles.leftHip) + '°', ctx, scaleX, scaleY);
+          drawAngleLabel(landmarks[LM.RIGHT_HIP], '股: ' + Math.round(angles.rightHip) + '°', ctx, scaleX, scaleY);
         }
       }
     }
 
-    function drawAngleLabel(landmark, text) {
+    function drawAngleLabel(landmark, text, ctx = canvasCtx, canvasW = canvasElement.width, canvasH = canvasElement.height) {
       if (!landmark) return;
-      const x = landmark.x * canvasElement.width;
-      const y = landmark.y * canvasElement.height;
-      canvasCtx.font = '12px monospace';
-      const metrics = canvasCtx.measureText(text);
+      const x = landmark.x * canvasW;
+      const y = landmark.y * canvasH;
+      ctx.font = '12px monospace';
+      const metrics = ctx.measureText(text);
       const padding = 4;
-      canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      canvasCtx.fillRect(x - metrics.width / 2 - padding, y - 20, metrics.width + padding * 2, 16);
-      canvasCtx.fillStyle = '#ffff00';
-      canvasCtx.textAlign = 'center';
-      canvasCtx.fillText(text, x, y - 8);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(x - metrics.width / 2 - padding, y - 20, metrics.width + padding * 2, 16);
+      ctx.fillStyle = '#ffff00';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, x, y - 8);
     }
 
     // MediaPipe initialization
@@ -1220,7 +1303,8 @@
                 const deltaT = (previewPrevMpTimestamp != null) ? (mpTimestamp - previewPrevMpTimestamp) : 0;
 
                 if (worldLandmarks && deltaT > 0 && previewPrevWorldLandmarks) {
-                  const angles = calcJointAngles(worldLandmarks);
+                  // 前額面では関節角度を計算しない
+                  const angles = currentPlane === 'sagittal' ? calcJointAngles(worldLandmarks) : null;
                   const trunkAngle = calcTrunkAngle(worldLandmarks);
                   const pelvicTilt = calcPelvicTilt(worldLandmarks);
                   const speed = calcWalkingSpeed(worldLandmarks, previewPrevWorldLandmarks, deltaT);
@@ -1488,22 +1572,20 @@
           console.log('[Video] Promise resolved - video loaded');
 
           // Setup ended handler
+          // NOTE: Do NOT call ensureAnalyzedPreviewReady() here.
+          // Doing so causes exportVideoElement to replay the video from the start,
+          // which the user experiences as the video playing twice.
+          // Analyzed preview generation is deferred to when the user explicitly
+          // requests it (save button), or via the deferred background path below.
           videoElement.onended = async () => {
             if (isAnalyzing) {
               await finalizeSession();
               stopAllProcessing();
-              
-              // Generate analyzed preview and enable export button after analysis completes
+              // stopAllProcessing() 内の enableAnalysisExportButtons で
+              // btn-save-analyzed-video も有効化・syncPhoneQuickActions も呼ばれるため
+              // ここでは追加通知のみ行う
               if (videoFileUrl && analysisData.length > 0) {
-                try {
-                  await ensureAnalyzedPreviewReady({ notify: false });
-                  document.getElementById('btn-save-analyzed-video').disabled = false;
-                  showNotification('解析完了！解析動画を生成しました。「解析動画」ボタンから保存できます。', 'success');
-                } catch (previewError) {
-                  console.error('[Analysis] Failed to pre-generate analyzed preview:', previewError);
-                  document.getElementById('btn-save-analyzed-video').disabled = false;
-                  showNotification('解析完了。解析動画の事前生成に失敗したため、保存時に再生成します。', 'warning');
-                }
+                showNotification('解析完了！「解析動画」ボタンから保存できます。', 'success');
               }
             }
           };
@@ -1658,6 +1740,23 @@
           videoEpochBaseMs = null;
         }
 
+      // For video mode: ensure MediaPipe receives a monotonically increasing
+      // timestamp. On the second (and subsequent) runs on the same video file,
+      // videoElement.currentTime resets to 0 which would produce a timestamp
+      // smaller than the last timestamp used in the previous run.
+      // We calculate an offset so that currentTime=0 maps to
+      // (lastAnalysisMpTimestamp + 1000ms), satisfying MediaPipe's strict requirement.
+        if (videoFileUrl) {
+          if (lastAnalysisMpTimestamp > 0) {
+            // After the seek, currentTime will be 0, so raw timestamp = 0 + offset.
+            // Set offset so that timestamp starts 1000ms after the last used value.
+            mpTimestampOffset = lastAnalysisMpTimestamp + 1000;
+          }
+          // else: first run, offset stays at its current value (0)
+        } else {
+          mpTimestampOffset = 0;
+        }
+
       // Reset analysis state
         isAnalyzing = true;
         analysisPlane = currentPlane;
@@ -1692,11 +1791,13 @@
         let lastMpTimestamp = -1;
 
         const scheduleNext = () => {
+          // Re-read isAnalyzing at schedule time (not closure-captured value)
+          // to prevent a stale true value from queueing a frame after stopAllProcessing().
           ({
             animationFrameId,
             videoFrameCallbackHandle
           } = scheduleAnalysisFrame({
-            isAnalyzing,
+            isAnalyzing: isAnalyzing,
             isVideoMode: !!videoFileUrl,
             videoElement,
             callback: processFrame,
@@ -1706,6 +1807,12 @@
 
         async function processFrame() {
         try {
+          // Guard: if analysis was stopped between the time this frame was
+          // scheduled and now, bail out immediately without scheduling the next frame.
+          if (!isAnalyzing) {
+            console.log('[Analysis] processFrame: isAnalyzing is false, stopping loop');
+            return;
+          }
           const mpTimestamp = getCurrentMediaPipeTimestamp();
           const framePlan = prepareAnalysisFrame({
             isAnalyzing,
@@ -1728,9 +1835,24 @@
 
           frameCount = framePlan.nextFrameCount;
           analysisFrameCount = frameCount;
+          const prevAnalysisStartMpTimestamp = analysisStartMpTimestamp;
           analysisStartMpTimestamp = framePlan.nextAnalysisStartMpTimestamp;
+          // On the very first analysed frame, record the video's absolute currentTime
+          // and video dimensions so the export pipeline can use the same time base
+          // and landmark normalisation reference as analysisData.elapsedMs / landmarks.
+          if (prevAnalysisStartMpTimestamp == null && analysisStartMpTimestamp != null) {
+            analysisVideoStartMs = videoElement.currentTime * 1000;
+            analysisVideoWidth  = videoElement.videoWidth;
+            analysisVideoHeight = videoElement.videoHeight;
+            console.log('[Analysis] First frame: videoSize', analysisVideoWidth, 'x', analysisVideoHeight,
+              '| canvasSize', canvasElement.width, 'x', canvasElement.height);
+          }
           const elapsedMs = framePlan.elapsedMs;
           lastMpTimestamp = framePlan.nextLastMpTimestamp;
+          // Mirror to outer scope so startAnalysis can calculate mpTimestampOffset
+          // on the next run without relying on videoElement.currentTime (which will
+          // already be 0 after the seek).
+          lastAnalysisMpTimestamp = lastMpTimestamp;
 
           const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
 
@@ -1748,7 +1870,10 @@
             drawEnhancedLandmarks(landmarks, worldLandmarks, false);
 
             const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
-            const angles = worldLandmarks ? calcJointAngles(worldLandmarks) : null;
+            // 前額面では関節角度を計算しない（カメラが正面向きのため矢状面角度は無意味）
+            const angles = (analysisPlane === 'sagittal' && worldLandmarks)
+              ? calcJointAngles(worldLandmarks)
+              : null;
             const trunkAngle = worldLandmarks ? calcTrunkAngle(worldLandmarks) : 0;
             const pelvicTilt = worldLandmarks ? calcPelvicTilt(worldLandmarks) : 0;
             const speed = (prevWorldLandmarks && worldLandmarks && deltaT > 0)
@@ -1776,6 +1901,7 @@
             });
 
             if (angles) {
+              // 矢状面のみ: 関節角度 EMA を更新
               emaValues.leftKnee = ema(emaValues.leftKnee, angles.leftKnee);
               emaValues.rightKnee = ema(emaValues.rightKnee, angles.rightKnee);
               emaValues.leftHip = ema(emaValues.leftHip, angles.leftHip);
@@ -1787,7 +1913,11 @@
             emaValues.cadence = ema(emaValues.cadence, cadence);
             emaValues.trunk = ema(emaValues.trunk, trunkAngle);
             emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt);
-            const kneeSymmetry = angles ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee) : 100;
+
+            // 対称性: 前額面はステップ対称性（歩行イベントベース）、矢状面は膝角度ベース
+            const kneeSymmetry = (analysisPlane === 'sagittal' && angles)
+              ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee)
+              : calcStepSymmetry(gaitEvents);
 
             const dataPoint = buildAnalysisDataPoint({
               elapsedMs,
@@ -1854,6 +1984,14 @@
         videoElement,
         videoFrameCallbackHandle
       }));
+
+      // For video-file mode: always pause the video immediately when analysis stops.
+      // This prevents the video from continuing to play (and being heard/seen) while
+      // the rest of the stop logic runs asynchronously.
+      if (videoFileUrl && videoElement && !videoElement.paused && !videoElement.ended) {
+        try { videoElement.pause(); } catch (_) { /* ignore */ }
+      }
+
       if (isRecording) {
         stopRecording();
       }
@@ -1879,8 +2017,12 @@
       enableAnalysisExportButtons({
         csvButton: document.getElementById('btn-csv'),
         reportButton: document.getElementById('btn-report'),
-        hasAnalysisData: postStopPlan.enableExports
+        analyzedVideoButton: document.getElementById('btn-save-analyzed-video'),
+        hasAnalysisData: postStopPlan.enableExports,
+        hasVideoSource: !!videoFileUrl
       });
+      // UI の同期を必ず行い、phone モードのボタン状態も更新する
+      syncPhoneQuickActions();
     }
 
     // Recording
@@ -2043,7 +2185,7 @@
       showNotification('録画を破棄しました', 'info');
     }
 
-    async function renderAnalyzedVideoBlob({ showStartMessage = true } = {}) {
+    async function renderAnalyzedVideoBlob({ showStartMessage = true, onProgress = null } = {}) {
       if (!videoFileUrl) {
         throw createAppError('NO_VIDEO_FILE', '動画ファイルがありません');
       }
@@ -2057,14 +2199,18 @@
       isGeneratingAnalyzedPreview = true;
       syncPhoneStageActions();
 
-      if (showStartMessage) {
-        showNotification('解析プレビューを生成中...', 'info');
-      }
+      // ── オフスクリーン専用の video / canvas / ctx を用意 ──────────────────
+      // メインの canvasElement / canvasCtx には一切触れないため、
+      // エクスポート中に画面が書き換わることはない（ユーザーには動画が
+      // 再生されて見えない）。
+      const exportVideoElement = document.createElement('video');
+      const exportCanvas = document.createElement('canvas');
+      let exportCtx = null;
 
       let endedHandler = null;
       let videoErrorHandler = null;
       let cleanupRecorderListeners = null;
-      const exportVideoElement = document.createElement('video');
+
       try {
         if (isAnalyzing) {
           stopAllProcessing();
@@ -2073,6 +2219,11 @@
         exportVideoElement.playsInline = true;
         exportVideoElement.muted = true;
         exportVideoElement.preload = 'auto';
+        // DOM に追加することで、ブラウザが動画の回転メタデータ（スマホ縦向き撮影など）を
+        // drawImage に対しても適用するようにする。DOM 外の video 要素では回転補正が
+        // 適用されず、videoWidth/Height が生データ（回転前）の値を返すブラウザがあるため。
+        exportVideoElement.style.cssText = 'position:fixed;visibility:hidden;width:0;height:0;pointer-events:none;';
+        document.body.appendChild(exportVideoElement);
 
         await waitForVideoLoad({
           videoElement: exportVideoElement,
@@ -2081,63 +2232,115 @@
           logger: console
         });
 
+        // オフスクリーン canvas のサイズを動画に合わせる。
+        // ランドマーク座標は解析時の videoElement.videoWidth/Height で正規化されているため、
+        // exportVideoElement が異なるサイズを返す場合に備え、解析時の寸法を優先使用する。
+        // （同一ファイルでも DOM内要素と動的生成要素でデコーダが異なり、異なる寸法が返ることがある）
+        // DOM追加後の videoWidth/videoHeight が analysisVideoWidth/Height と一致するか確認する。
+        const exportVideoW = exportVideoElement.videoWidth;
+        const exportVideoH = exportVideoElement.videoHeight;
+        const exportW = (analysisVideoWidth  > 0 ? analysisVideoWidth  : exportVideoW)  || canvasElement.width;
+        const exportH = (analysisVideoHeight > 0 ? analysisVideoHeight : exportVideoH) || canvasElement.height;
+        exportCanvas.width  = exportW;
+        exportCanvas.height = exportH;
+        exportCtx = exportCanvas.getContext('2d');
+
         const exportFps = estimateExportFrameRate(exportVideoElement);
         const exportBitrate = estimateExportVideoBitrate({
-          width: exportVideoElement.videoWidth,
-          height: exportVideoElement.videoHeight,
+          width: exportCanvas.width,
+          height: exportCanvas.height,
           fps: exportFps
         });
-        console.log('[Preview Export] fps:', exportFps, '| bitrate:', exportBitrate, '| resolution:', exportVideoElement.videoWidth, 'x', exportVideoElement.videoHeight);
+        console.log('[Export] fps:', exportFps, '| bitrate:', exportBitrate,
+          '| exportCanvasSize:', exportCanvas.width, 'x', exportCanvas.height,
+          '| exportVideoSize:', exportVideoW, 'x', exportVideoH,
+          '| analysisVideoSize:', analysisVideoWidth, 'x', analysisVideoHeight,
+          '| analysisCanvasSize:', canvasElement.width, 'x', canvasElement.height,
+          '| analysisVideoStartMs:', analysisVideoStartMs.toFixed(1),
+          '| dimensionMismatch:', (exportVideoW !== analysisVideoWidth || exportVideoH !== analysisVideoHeight) ? 'YES ⚠' : 'no');
 
-        const stream = canvasElement.captureStream(exportFps);
+        // ── オフスクリーン canvas から MediaRecorder でキャプチャ ────────────
+        const stream = exportCanvas.captureStream(exportFps);
         const chunks = [];
-        const {
-          mimeType,
-          recorder
-        } = createCanvasRecordingSession({
+        const { mimeType, recorder } = createCanvasRecordingSession({
           stream,
           MediaRecorderCtor: MediaRecorder,
           videoBitsPerSecond: exportBitrate
         });
 
-        let exportActive = false;
-        let exportFrameHandle = null;
-        let exportFrameHandleUsesVideoCallback = false;
+        let exportActive  = false;
         let exportFinished = false;
+        let exportFrameHandle = null;
 
         const cancelExportLoop = () => {
-          exportFrameHandle = cancelScheduledHandle({
-            handle: exportFrameHandle,
-            videoElement: exportVideoElement,
-            preferVideoFrameCallback: exportFrameHandleUsesVideoCallback,
-            cancelAnimationFrameFn: cancelAnimationFrame
-          });
+          if (exportFrameHandle) {
+            if (exportVideoElement.cancelVideoFrameCallback) {
+              try { exportVideoElement.cancelVideoFrameCallback(exportFrameHandle); } catch (_) {}
+            } else {
+              cancelAnimationFrame(exportFrameHandle);
+            }
+            exportFrameHandle = null;
+          }
         };
 
+        // ── フレーム描画ループ ────────────────────────────────────────────────
+        // requestVideoFrameCallback が使える環境では動画フレームに完全同期する。
+        // 使えない環境では requestAnimationFrame でポーリングするが、
+        // currentTime が変わっていないフレームは描画をスキップして重複描画を防ぐ。
+        let lastRenderedTime = -1; // rAF フォールバック用: 前回描画した currentTime
         const renderExportFrame = () => {
           if (!exportActive) return;
+          if (exportVideoElement.ended) return;
 
-          const elapsedMs = getSafeVideoElapsedMs(exportVideoElement);
-          const dataPoint = findInterpolatedAnalysisPoint(analysisData, elapsedMs);
-          renderAnalysisFrameFromData(dataPoint, exportVideoElement);
-
-          if (exportVideoElement.ended) {
-            return;
-          }
-
-          if (exportVideoElement.paused) {
-            // Keep polling while paused/buffering so export can resume on the next frame.
-            exportFrameHandleUsesVideoCallback = false;
+          // rAF フォールバック時: 動画フレームが更新されていなければスキップ
+          // （requestVideoFrameCallback はフレーム更新時のみ呼ばれるので不要）
+          const currentVideoTime = exportVideoElement.currentTime;
+          if (!exportVideoElement.requestVideoFrameCallback && currentVideoTime === lastRenderedTime && !exportVideoElement.paused) {
             exportFrameHandle = requestAnimationFrame(renderExportFrame);
             return;
           }
 
-          exportFrameHandleUsesVideoCallback = !!exportVideoElement.requestVideoFrameCallback;
-          exportFrameHandle = scheduleMediaWork({
-            videoElement: exportVideoElement,
-            callback: renderExportFrame,
-            requestAnimationFrameFn: requestAnimationFrame
-          });
+          const elapsedMs = getSafeVideoElapsedMs(exportVideoElement);
+          const dataPoint = findInterpolatedAnalysisPoint(analysisData, elapsedMs);
+          // NOTE: renderAnalysisFrameFromData は呼ばない。
+          // あの関数はメインの canvasCtx に描くため、エクスポート中に画面が更新されてしまう。
+          // オフスクリーン exportCtx への描画は以下で直接行う。
+
+          // ── 進捗コールバックを呼ぶ ─────────────────────────────────────────
+          if (onProgress && Number.isFinite(exportVideoElement.duration) && exportVideoElement.duration > 0) {
+            const pct = Math.min(99, (currentVideoTime / exportVideoElement.duration) * 100);
+            onProgress(pct);
+          }
+
+          // ── オフスクリーン ctx へ描画（メイン canvas は汚さない） ───────────
+          exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+          exportCtx.drawImage(exportVideoElement, 0, 0, exportCanvas.width, exportCanvas.height);
+          lastRenderedTime = currentVideoTime;
+
+          if (dataPoint?.landmarks?.length) {
+            // ctx / canvasW / canvasH をオフスクリーン値で渡すため画面は変化しない
+            drawEnhancedLandmarks(
+              dataPoint.landmarks,
+              dataPoint.worldLandmarks || null,
+              false,
+              exportCtx,
+              exportCanvas.width,
+              exportCanvas.height
+            );
+          }
+
+          if (exportVideoElement.paused) {
+            // バッファ待ち: rAF でポーリングして再開を待つ
+            exportFrameHandle = requestAnimationFrame(renderExportFrame);
+            return;
+          }
+
+          // 次フレームをスケジュール
+          if (exportVideoElement.requestVideoFrameCallback) {
+            exportFrameHandle = exportVideoElement.requestVideoFrameCallback(renderExportFrame);
+          } else {
+            exportFrameHandle = requestAnimationFrame(renderExportFrame);
+          }
         };
 
         const finishExport = async () => {
@@ -2145,7 +2348,6 @@
           exportFinished = true;
           exportActive = false;
           cancelExportLoop();
-          exportFrameHandleUsesVideoCallback = false;
           if (recorder.state !== 'inactive') {
             recorder.stop();
           }
@@ -2155,72 +2357,75 @@
         };
 
         recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
-            chunks.push(e.data);
-          }
+          if (e.data.size > 0) chunks.push(e.data);
         };
 
         const recorderStopPromise = new Promise((resolve, reject) => {
-          const onRecorderStop = () => {
-            cleanupRecorderListeners?.();
-            resolve();
-          };
-          const onRecorderError = () => {
-            cleanupRecorderListeners?.();
-            reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。'));
-          };
-
+          const onStop  = () => { cleanupRecorderListeners?.(); resolve(); };
+          const onError = () => { cleanupRecorderListeners?.(); reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。')); };
           cleanupRecorderListeners = () => {
-            recorder.removeEventListener('stop', onRecorderStop);
-            recorder.removeEventListener('error', onRecorderError);
+            recorder.removeEventListener('stop',  onStop);
+            recorder.removeEventListener('error', onError);
           };
-
-          recorder.addEventListener('stop', onRecorderStop);
-          recorder.addEventListener('error', onRecorderError);
+          recorder.addEventListener('stop',  onStop);
+          recorder.addEventListener('error', onError);
         });
 
         endedHandler = async () => {
-          try {
-            await finishExport();
-          } catch (error) {
-            console.warn('[Preview Export] finishExport on ended failed:', error);
-          } finally {
-            exportVideoElement.removeEventListener('ended', endedHandler);
-          }
+          try { await finishExport(); }
+          catch (e) { console.warn('[Export] finishExport on ended failed:', e); }
+          finally   { exportVideoElement.removeEventListener('ended', endedHandler); }
         };
-
         exportVideoElement.addEventListener('ended', endedHandler);
 
         const videoErrorPromise = new Promise((_, reject) => {
-          videoErrorHandler = () => {
-            reject(createAppError('ANALYZED_VIDEO_EXPORT_VIDEO_ERROR', '動画の再生中にエラーが発生しました。'));
-          };
+          videoErrorHandler = () => reject(createAppError('ANALYZED_VIDEO_EXPORT_VIDEO_ERROR', '動画の再生中にエラーが発生しました。'));
           exportVideoElement.addEventListener('error', videoErrorHandler, { once: true });
         });
 
+        // ── 録画開始 ──────────────────────────────────────────────────────────
         exportVideoElement.currentTime = 0;
-        renderAnalysisFrameFromData(findInterpolatedAnalysisPoint(analysisData, 0), exportVideoElement);
+        // 初回フレームをオフスクリーン exportCtx に描画してから recorder を start。
+        // renderAnalysisFrameFromData はメインの canvasCtx に描くため使わない。
+        {
+          const firstDataPoint = findInterpolatedAnalysisPoint(analysisData, 0);
+          exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+          exportCtx.drawImage(exportVideoElement, 0, 0, exportCanvas.width, exportCanvas.height);
+          if (firstDataPoint?.landmarks?.length) {
+            drawEnhancedLandmarks(
+              firstDataPoint.landmarks,
+              firstDataPoint.worldLandmarks || null,
+              false,
+              exportCtx,
+              exportCanvas.width,
+              exportCanvas.height
+            );
+          }
+        }
         recorder.start();
         exportActive = true;
 
         const hasKnownDuration = Number.isFinite(exportVideoElement.duration) && exportVideoElement.duration > 0;
-        const exportTimeoutMs = hasKnownDuration
+        const exportTimeoutMs  = hasKnownDuration
           ? Math.max(15000, Math.ceil(exportVideoElement.duration * 2000 + 3000))
           : 20000;
 
         let exportTimeoutHandle = null;
         try {
           await exportVideoElement.play();
-          // NOTE: start render loop only after playback actually starts.
-          // Starting while paused captures a single frame and can freeze analyzed output.
-          renderExportFrame();
+          // play() が解決してから描画ループ開始（最初のフレームが確実に描かれた後）
+          if (exportVideoElement.requestVideoFrameCallback) {
+            exportFrameHandle = exportVideoElement.requestVideoFrameCallback(renderExportFrame);
+          } else {
+            exportFrameHandle = requestAnimationFrame(renderExportFrame);
+          }
 
           await Promise.race([
             recorderStopPromise,
             videoErrorPromise,
             new Promise((_, reject) => {
               exportTimeoutHandle = setTimeout(() => {
-                reject(createAppError('ANALYZED_VIDEO_EXPORT_TIMEOUT', '解析動画の生成がタイムアウトしました。動画を短くして再実行してください。'));
+                reject(createAppError('ANALYZED_VIDEO_EXPORT_TIMEOUT', '解析動画の生成がタイムアウトしました。'));
               }, exportTimeoutMs);
             })
           ]);
@@ -2228,16 +2433,16 @@
           await finishExport();
           throw exportError;
         } finally {
-          if (exportTimeoutHandle) {
-            clearTimeout(exportTimeoutHandle);
-          }
+          if (exportTimeoutHandle) clearTimeout(exportTimeoutHandle);
         }
 
         return {
           blob: new Blob(chunks, { type: mimeType }),
           mimeType
         };
+
       } finally {
+        // ── 必ずオフスクリーン資源を解放 ─────────────────────────────────────
         if (typeof endedHandler === 'function') {
           exportVideoElement.removeEventListener('ended', endedHandler);
         }
@@ -2248,12 +2453,16 @@
         exportVideoElement.pause();
         exportVideoElement.removeAttribute('src');
         exportVideoElement.load();
+        // DOM に追加した場合は削除する
+        if (exportVideoElement.parentNode) {
+          exportVideoElement.parentNode.removeChild(exportVideoElement);
+        }
         isGeneratingAnalyzedPreview = false;
         syncPhoneStageActions();
       }
     }
 
-    async function ensureAnalyzedPreviewReady({ notify = true } = {}) {
+    async function ensureAnalyzedPreviewReady({ notify = true, onProgress = null } = {}) {
       if (analyzedPreviewBlob && analyzedPreviewUrl) {
         return {
           blob: analyzedPreviewBlob,
@@ -2261,7 +2470,7 @@
         };
       }
 
-      const result = await renderAnalyzedVideoBlob({ showStartMessage: notify });
+      const result = await renderAnalyzedVideoBlob({ showStartMessage: false, onProgress });
       analyzedPreviewBlob = result.blob;
       analyzedPreviewMimeType = result.mimeType;
       analyzedPreviewUrl = revokePreviewUrl(analyzedPreviewUrl);
@@ -2287,43 +2496,59 @@
         return;
       }
 
-      isSavingAnalyzedVideo = true;
-      const analyzedVideoButton = document.getElementById('btn-save-analyzed-video');
-      if (analyzedVideoButton) {
-        analyzedVideoButton.disabled = true;
-      }
-      syncPhoneQuickActions();
+      // ── すべての「解析動画」ボタンの表示を生成中に切り替える ─────────────
+      const analyzedBtns = [
+        document.getElementById('btn-save-analyzed-video'),
+        document.getElementById('btn-phone-analyzed-video'),
+        document.getElementById('btn-phone-stage-save')
+      ].filter(Boolean);
+
+      const origTexts = analyzedBtns.map(b => b.textContent);
+      analyzedBtns.forEach(b => {
+        b.disabled = true;
+        b.textContent = '⏳ 生成中… 0%';
+      });
+
+      // プログレスバー付き永続通知を表示
+      const progressNotif = showPersistentProgressNotification('解析動画を生成中');
       try {
-        const {
-          blob,
-          mimeType
-        } = await ensureAnalyzedPreviewReady({ notify: true });
+        const { blob, mimeType } = await ensureAnalyzedPreviewReady({
+          notify: false,
+          onProgress: (pct) => {
+            progressNotif.setProgress(pct);
+            analyzedBtns.forEach(b => { b.textContent = `⏳ 生成中… ${Math.round(pct)}%`; });
+          }
+        });
+
+        progressNotif.finish('解析動画の生成が完了しました。ダウンロードを開始します。');
 
         downloadBlob({
           blob,
-          filename: buildAnalyzedVideoFilename({
-            patientId,
-            mimeType
-          }),
+          filename: buildAnalyzedVideoFilename({ patientId, mimeType }),
           URLRef: URL,
           documentRef: document
         });
 
         showNotification('解析動画を保存しました', 'success');
       } catch (error) {
+        progressNotif.dismiss();
+        // ボタンを元の表示に戻す
+        analyzedBtns.forEach((b, i) => {
+          b.textContent = origTexts[i];
+          b.disabled = false;
+        });
         if (error?.code === 'ANALYZED_PREVIEW_BUSY') {
           showNotification(error.message, 'warning');
           return;
         }
         console.error('[Save Analyzed Video] Error:', error);
         showNotification('解析動画の保存に失敗しました: ' + error.message, 'error');
-      } finally {
-        isSavingAnalyzedVideo = false;
-        if (analyzedVideoButton) {
-          analyzedVideoButton.disabled = !videoFileUrl || analysisData.length === 0 || isGeneratingAnalyzedPreview;
-        }
-        syncPhoneQuickActions();
+        return;
       }
+
+      // 成功時はボタンを元テキストに戻す（disabledは syncPhoneStageActions に任せる）
+      analyzedBtns.forEach((b, i) => { b.textContent = origTexts[i]; });
+      syncPhoneQuickActions();
     }
 
     // Export CSV
@@ -2397,77 +2622,80 @@
     // Report charts storage
     let reportCharts = { knee: null, hip: null, timeline: null };
 
-    function renderReportCharts(avgLeftKnee, avgRightKnee, avgLeftHip, avgRightHip, avgLeftAnkle, avgRightAnkle) {
+    function renderReportCharts(avgLeftKnee, avgRightKnee, avgLeftHip, avgRightHip, avgLeftAnkle, avgRightAnkle, reportPlane) {
       // Destroy existing charts to prevent memory leaks
       if (reportCharts.knee) reportCharts.knee.destroy();
       if (reportCharts.hip) reportCharts.hip.destroy();
       if (reportCharts.timeline) reportCharts.timeline.destroy();
 
-      // Knee comparison chart
-      const kneeCtx = document.getElementById('report-knee-chart');
-      if (kneeCtx) {
-        reportCharts.knee = new Chart(kneeCtx, {
-          type: 'bar',
-          data: {
-            labels: ['左膝', '右膝'],
-            datasets: [{
-              label: '膝関節角度 (°)',
-              data: [avgLeftKnee, avgRightKnee],
-              backgroundColor: ['#3b82f6', '#ef4444'],
-              borderRadius: 4
-            }]
-          },
-          options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              title: { display: true, text: '膝関節角度', font: { size: 11 } }
+      // 前額面では関節角度チャートは表示しない（矢状面のみ）
+      if (reportPlane === 'sagittal') {
+        // Knee comparison chart
+        const kneeCtx = document.getElementById('report-knee-chart');
+        if (kneeCtx) {
+          reportCharts.knee = new Chart(kneeCtx, {
+            type: 'bar',
+            data: {
+              labels: ['左膝', '右膝'],
+              datasets: [{
+                label: '膝関節角度 (°)',
+                data: [avgLeftKnee, avgRightKnee],
+                backgroundColor: ['#3b82f6', '#ef4444'],
+                borderRadius: 4
+              }]
             },
-            scales: {
-              x: {
-                beginAtZero: true,
-                max: 80,
-                title: { display: false }
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                title: { display: true, text: '膝関節角度', font: { size: 11 } }
+              },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  max: 80,
+                  title: { display: false }
+                }
               }
             }
-          }
-        });
-      }
+          });
+        }
 
-      // Hip comparison chart
-      const hipCtx = document.getElementById('report-hip-chart');
-      if (hipCtx) {
-        reportCharts.hip = new Chart(hipCtx, {
-          type: 'bar',
-          data: {
-            labels: ['左股関節', '右股関節'],
-            datasets: [{
-              label: '股関節角度 (°)',
-              data: [avgLeftHip, avgRightHip],
-              backgroundColor: ['#10b981', '#f59e0b'],
-              borderRadius: 4
-            }]
-          },
-          options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              title: { display: true, text: '股関節角度', font: { size: 11 } }
+        // Hip comparison chart
+        const hipCtx = document.getElementById('report-hip-chart');
+        if (hipCtx) {
+          reportCharts.hip = new Chart(hipCtx, {
+            type: 'bar',
+            data: {
+              labels: ['左股関節', '右股関節'],
+              datasets: [{
+                label: '股関節角度 (°)',
+                data: [avgLeftHip, avgRightHip],
+                backgroundColor: ['#10b981', '#f59e0b'],
+                borderRadius: 4
+              }]
             },
-            scales: {
-              x: {
-                beginAtZero: true,
-                max: 60,
-                title: { display: false }
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                title: { display: true, text: '股関節角度', font: { size: 11 } }
+              },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  max: 60,
+                  title: { display: false }
+                }
               }
             }
-          }
-        });
-      }
+          });
+        }
+      } // end sagittal-only charts
 
       // Timeline chart (speed & symmetry)
       const timelineCtx = document.getElementById('report-timeline-chart');
@@ -2508,17 +2736,17 @@
             },
             plugins: {
               title: { display: false },
-              legend: { display: false }
+              legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 8 } }
             },
             scales: {
               x: {
-                title: { display: false }
+                title: { display: true, text: '経過時間', font: { size: 10 } }
               },
               y: {
                 type: 'linear',
                 display: true,
                 position: 'left',
-                title: { display: false },
+                title: { display: true, text: '歩行速度 (m/s)', font: { size: 10 } },
                 min: 0,
                 max: 2
               },
@@ -2526,7 +2754,7 @@
                 type: 'linear',
                 display: true,
                 position: 'right',
-                title: { display: false },
+                title: { display: true, text: '対称性 (%)', font: { size: 10 } },
                 min: 0,
                 max: 100,
                 grid: { drawOnChartArea: false }
@@ -2565,7 +2793,7 @@
       });
 
       setTimeout(() => {
-        renderReportCharts(summary.avgLeftKnee, summary.avgRightKnee, summary.avgLeftHip, summary.avgRightHip, summary.avgLeftAnkle, summary.avgRightAnkle);
+        renderReportCharts(summary.avgLeftKnee, summary.avgRightKnee, summary.avgLeftHip, summary.avgRightHip, summary.avgLeftAnkle, summary.avgRightAnkle, summary.reportPlane);
       }, 100);
 
       openReportModal({ documentRef: document });
