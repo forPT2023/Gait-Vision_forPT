@@ -42,6 +42,27 @@ test('getMediaPipeTimestamp safely normalizes invalid video currentTime values',
   );
 });
 
+test('getMediaPipeTimestamp applies offset to video currentTime for monotonic continuity', () => {
+  // Simulates a second analysis run: currentTime restarted from 0 but offset
+  // ensures the timestamp continues from where the previous run left off.
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: false, currentTime: 0, now: () => 9999, offset: 31000 }),
+    31000
+  );
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: false, currentTime: 1.5, now: () => 9999, offset: 31000 }),
+    32500
+  );
+});
+
+test('getMediaPipeTimestamp offset is ignored for camera streams', () => {
+  // Camera mode always uses wall-clock time; offset must not be applied.
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: true, currentTime: 0, now: () => 5000, offset: 99999 }),
+    5000
+  );
+});
+
 test('getSourceMode resolves camera, video, and idle states', () => {
   assert.equal(getSourceMode({ hasStream: true, videoFileUrl: null }), 'camera');
   assert.equal(getSourceMode({ hasStream: false, videoFileUrl: 'blob:video' }), 'video');

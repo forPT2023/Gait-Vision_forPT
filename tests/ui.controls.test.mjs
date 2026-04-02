@@ -172,3 +172,55 @@ test('enableAnalysisExportButtons enables csv and report buttons when data exist
   assert.equal(csvButton.disabled, false);
   assert.equal(reportButton.disabled, false);
 });
+
+test('enableAnalysisExportButtons enables analyzedVideoButton when hasVideoSource is true', () => {
+  const csvButton = { disabled: true };
+  const reportButton = { disabled: true };
+  const analyzedVideoButton = { disabled: true };
+
+  enableAnalysisExportButtons({
+    csvButton,
+    reportButton,
+    analyzedVideoButton,
+    hasAnalysisData: true,
+    hasVideoSource: true
+  });
+
+  assert.equal(csvButton.disabled, false);
+  assert.equal(reportButton.disabled, false);
+  assert.equal(analyzedVideoButton.disabled, false);
+});
+
+test('enableAnalysisExportButtons does NOT enable analyzedVideoButton when hasVideoSource is false', () => {
+  const csvButton = { disabled: true };
+  const reportButton = { disabled: true };
+  const analyzedVideoButton = { disabled: true };
+
+  enableAnalysisExportButtons({
+    csvButton,
+    reportButton,
+    analyzedVideoButton,
+    hasAnalysisData: true,
+    hasVideoSource: false
+  });
+
+  assert.equal(analyzedVideoButton.disabled, true);
+});
+
+test('enableAnalysisExportButtons does nothing when hasAnalysisData is false', () => {
+  const csvButton = { disabled: true };
+  const reportButton = { disabled: true };
+  const analyzedVideoButton = { disabled: true };
+
+  enableAnalysisExportButtons({
+    csvButton,
+    reportButton,
+    analyzedVideoButton,
+    hasAnalysisData: false,
+    hasVideoSource: true
+  });
+
+  assert.equal(csvButton.disabled, true);
+  assert.equal(reportButton.disabled, true);
+  assert.equal(analyzedVideoButton.disabled, true);
+});

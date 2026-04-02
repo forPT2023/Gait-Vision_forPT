@@ -137,12 +137,14 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
     videoElement.addEventListener?.('canplaythrough', doneCanplaythrough);
     videoElement.addEventListener?.('error', onError);
 
+    // Clear any existing src first without calling load() to avoid
+    // triggering an extra 'emptied' / media reset cycle.
     if (videoElement.src) {
       videoElement.removeAttribute?.('src');
-      videoElement.load?.();
     }
     videoElement.loop = false;
     videoElement.src = src;
+    // Single load() call after src is set is sufficient.
     try {
       videoElement.load?.();
     } catch (error) {
@@ -194,15 +196,44 @@ export async function startVideoPlaybackForAnalysis({
   playbackStartLocks.add(videoElement);
   logger.log('[Analysis] Video mode - starting playback');
   try {
-    videoElement.currentTime = 0;
-
-    if (videoElement.ended) {
-      logger.log('[Analysis] Reloading ended video');
-      videoElement.load();
+    // When the video has ended, seek back to the start.
+    // Do NOT call load() here: load() resets the media resource pipeline and
+    // can fire a new 'canplay'/'loadeddata' sequence which, combined with any
+    // pending event listeners, causes the video to appear to start twice.
+    // Simply resetting currentTime and calling play() is sufficient for a
+    // replay after a normal end-of-stream.
+    if (videoElement.ended || videoElement.currentTime !== 0) {
+      videoElement.currentTime = 0;
+      // Give the browser one tick to process the seek before play().
       await new Promise((resolve) => setTimeoutFn(resolve, reloadDelayMs));
     }
 
-    await videoElement.play();
+    // Wait for the 'playing' event to confirm the browser has actually started
+    // delivering frames. This is critical when the video was in 'ended' state:
+    // play() resolves as soon as playback is *initiated*, but requestVideoFrameCallback
+    // will never fire if videoElement.ended is still true at registration time.
+    // Waiting for 'playing' guarantees ended=false and the first frame is incoming.
+    await new Promise((resolve, reject) => {
+      // If already playing (not ended, not paused), resolve immediately.
+      if (!videoElement.ended && !videoElement.paused) {
+        resolve();
+        return;
+      }
+      const onPlaying = () => {
+        videoElement.removeEventListener('playing', onPlaying);
+        videoElement.removeEventListener('error', onError);
+        resolve();
+      };
+      const onError = () => {
+        videoElement.removeEventListener('playing', onPlaying);
+        videoElement.removeEventListener('error', onError);
+        reject(new Error('Video error during play'));
+      };
+      videoElement.addEventListener('playing', onPlaying);
+      videoElement.addEventListener('error', onError);
+      videoElement.play().catch(reject);
+    });
+
     logger.log('[Analysis] Video play() succeeded');
 
     return {

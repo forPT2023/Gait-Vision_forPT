@@ -8,10 +8,14 @@ export const REPORT_THRESHOLDS = {
   sagittal: {
     leftKnee: { normalMin: 0, normalMax: 80 },
     rightKnee: { normalMin: 0, normalMax: 80 },
+    leftAnkle: { normalMin: 60, normalMax: 120 },
+    rightAnkle: { normalMin: 60, normalMax: 120 },
     pelvis: { normalMin: 0, normalMax: 10, elevatedAbove: 10 },
     kneeDiff: { threshold: 10, elevatedAbove: 15 },
     hipDiff: { threshold: 10, elevatedAbove: 15 },
-    ankleDiff: { threshold: 5, elevatedAbove: 10 }
+    ankleDiff: { threshold: 5, elevatedAbove: 10 },
+    speed: { normalMin: 0.8, normalMax: 1.4, slowBelow: 0.8, strongAbove: 1.5 },
+    cadence: { normalMin: 100, normalMax: 130, lowBelow: 100, strongAbove: 120 }
   }
 };
 

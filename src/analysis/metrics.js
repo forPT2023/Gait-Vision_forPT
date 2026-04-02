@@ -150,6 +150,33 @@ export function calcSymmetryIndex(left, right) {
   return Math.max(0, Math.min(100, symmetry));
 }
 
+/**
+ * 前額面用: 歩行イベント（ヒールストライク）の左右インターバル比から対称性を算出。
+ * 左右交互のヒールストライク間隔を比較し、差が小さいほど100に近い値を返す。
+ * イベントが不足している場合は100（判定不能＝問題なし）を返す。
+ */
+export function calcStepSymmetry(gaitEvents) {
+  if (!Array.isArray(gaitEvents) || gaitEvents.length < 4) return 100;
+
+  // 直近8イベントのインターバルを収集
+  const recent = gaitEvents.slice(-8);
+  const intervals = [];
+  for (let i = 1; i < recent.length; i++) {
+    const dt = recent[i].timestamp - recent[i - 1].timestamp;
+    if (dt > 0 && dt < 2000) intervals.push(dt);
+  }
+  if (intervals.length < 2) return 100;
+
+  // 奇数インデックス（左→右）と偶数インデックス（右→左）の平均インターバルを比較
+  const odd  = intervals.filter((_, i) => i % 2 === 0);
+  const even = intervals.filter((_, i) => i % 2 === 1);
+  if (odd.length === 0 || even.length === 0) return 100;
+
+  const avgOdd  = odd.reduce((s, v) => s + v, 0) / odd.length;
+  const avgEven = even.reduce((s, v) => s + v, 0) / even.length;
+  return calcSymmetryIndex(avgOdd, avgEven);
+}
+
 export function detectGaitEvent({ landmarks, prevLandmarks, timestamp, lastHeelStrikeTime, logger = console, minIntervalMs = 250 }) {
   if (!landmarks || landmarks.length < 33 || !prevLandmarks || prevLandmarks.length < 33) {
     return { event: null, nextLastHeelStrikeTime: lastHeelStrikeTime, stepIncrement: 0 };

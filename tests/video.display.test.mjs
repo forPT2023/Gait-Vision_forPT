@@ -36,6 +36,43 @@ test('resolveDisplaySourceDimensions swaps live camera dimensions when viewport 
   );
 });
 
+test('calculateCanvasLayout preserves exact video aspect ratio at non-integer DPR values', () => {
+  // Portrait video (1080×1920, ratio 9:16) inside a landscape container at DPR 1.5.
+  // Naive rounding of both dimensions independently gives 608×1080 (AR 0.5630),
+  // which differs from the true 9:16 ratio (0.5625) and causes landmark misalignment.
+  // The GCD-based algorithm must produce exact integer multiples of the ratio unit.
+  const layout = calculateCanvasLayout({
+    containerWidth: 1280,
+    containerHeight: 720,
+    sourceWidth: 1080,
+    sourceHeight: 1920,
+    devicePixelRatio: 1.5
+  });
+
+  // Both pixel dimensions must be exact multiples of the GCD units (9 and 16).
+  assert.equal(layout.pixelWidth  % 9,  0, 'pixelWidth must be a multiple of 9');
+  assert.equal(layout.pixelHeight % 16, 0, 'pixelHeight must be a multiple of 16');
+  // Exact ratio check: pixelWidth / pixelHeight === 9 / 16
+  assert.equal(layout.pixelWidth * 16, layout.pixelHeight * 9,
+    'pixelWidth/pixelHeight must equal exactly 9/16');
+});
+
+test('calculateCanvasLayout preserves exact ratio for landscape video at DPR 1.75', () => {
+  // Landscape video 1920×1080 (16:9) at DPR 1.75.
+  const layout = calculateCanvasLayout({
+    containerWidth: 1280,
+    containerHeight: 720,
+    sourceWidth: 1920,
+    sourceHeight: 1080,
+    devicePixelRatio: 1.75
+  });
+
+  assert.equal(layout.pixelWidth  % 16, 0, 'pixelWidth must be a multiple of 16');
+  assert.equal(layout.pixelHeight % 9,  0, 'pixelHeight must be a multiple of 9');
+  assert.equal(layout.pixelWidth * 9, layout.pixelHeight * 16,
+    'pixelWidth/pixelHeight must equal exactly 16/9');
+});
+
 test('syncCanvasDisplaySize keeps css and backing-store sizes in sync', () => {
   const canvasElement = {
     width: 0,

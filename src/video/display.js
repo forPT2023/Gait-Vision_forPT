@@ -72,11 +72,48 @@ export function calculateCanvasLayout({
     maxDevicePixelRatio
   );
 
+  // When the source has known dimensions we must preserve the exact video
+  // aspect ratio in pixel space.  Rounding cssWidth and cssHeight independently
+  // can introduce a sub-pixel error (e.g. portrait 1080×1920 at DPR 1.5 gives
+  // css 405×720 → naively rounded pixels 608×1080 which is AR 0.5630 vs the
+  // true 0.5625).  That tiny stretch causes MediaPipe landmarks (normalised by
+  // videoWidth/Height) to appear offset from the drawn video frame.
+  //
+  // Fix: reduce sourceWidth / sourceHeight by their GCD to get the simplest
+  // integer ratio (w_unit : h_unit), then find the largest integer multiplier n
+  // such that n*w_unit ≤ targetPixelWidth and n*h_unit ≤ targetPixelHeight.
+  // This guarantees pixelWidth / pixelHeight === sourceWidth / sourceHeight exactly.
+  let pixelWidth;
+  let pixelHeight;
+
+  if (hasSourceDimensions) {
+    const targetPixelWidth  = Math.max(1, Math.round(cssWidth  * scale));
+    const targetPixelHeight = Math.max(1, Math.round(cssHeight * scale));
+
+    // Euclidean GCD
+    const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+    const g = gcd(sourceWidth, sourceHeight);
+    const wUnit = sourceWidth  / g;  // e.g. 9 for 1080×1920
+    const hUnit = sourceHeight / g;  // e.g. 16 for 1080×1920
+
+    // Largest integer multiplier that fits inside the target pixel box
+    const n = Math.max(1, Math.min(
+      Math.floor(targetPixelWidth  / wUnit),
+      Math.floor(targetPixelHeight / hUnit)
+    ));
+
+    pixelWidth  = n * wUnit;
+    pixelHeight = n * hUnit;
+  } else {
+    pixelWidth  = Math.max(1, Math.round(cssWidth  * scale));
+    pixelHeight = Math.max(1, Math.round(cssHeight * scale));
+  }
+
   return {
     cssWidth,
     cssHeight,
-    pixelWidth: Math.max(1, Math.round(cssWidth * scale)),
-    pixelHeight: Math.max(1, Math.round(cssHeight * scale)),
+    pixelWidth,
+    pixelHeight,
     scale,
     sourceAspectRatio
   };

@@ -144,40 +144,39 @@ export function buildReportHtml(summary) {
       </div>
 
       <div class="report-comments" style="margin-top: 0.75rem; background: #eff6ff; border-left-color: #2563eb; color: #1e3a8a;">
-        品質サマリー: ${summary.qualitySummary}
+        📋 解析品質: ${summary.qualitySummary}
       </div>
 
       ${renderPrimaryMetrics(summary)}
 
-      <h2>📊 関節角度比較</h2>
-      <div class="report-charts-row">
-        <div class="report-chart-box">
-          <canvas id="report-knee-chart" class="report-chart-mini"></canvas>
-        </div>
-        <div class="report-chart-box">
-          <canvas id="report-hip-chart" class="report-chart-mini"></canvas>
-        </div>
-      </div>
 
-      <h2>📈 時系列推移</h2>
+
+      <h2>📈 時系列推移 <small style="font-size:0.72rem;color:#64748b;font-weight:normal;">${summary.reportPlane === 'sagittal' ? '※ 矢状面での歩行速度・対称性は参考値。信頼性は前額面より低い' : ''}</small></h2>
       <div class="report-chart-box">
         <canvas id="report-timeline-chart" class="report-chart-mini"></canvas>
       </div>
+      ${summary.reportPlane === 'frontal' ? '' : '<p style="font-size:0.72rem;color:#94a3b8;margin:0.25rem 0 0.5rem 0;">歩行速度は股関節変位から推定。対称性は歩行イベント間隔から算出。いずれも計測誤差を含みます。</p>'}
 
-      <h2>🦵 関節角度詳細</h2>
+      ${summary.reportPlane === 'sagittal' ? `
+      <h2>🦺 関節角度詳細</h2>
+      <p style="font-size:0.72rem;color:#64748b;margin:0 0 0.5rem 0;">
+        ※ 左右差の評価基準：膝−10°、足首−5°を超える差を「やや差あり」、中央値の2倍超を「左右差大」としています。
+        全歩行フレームの平均値であり、立脚中期またはスウィング最大屈曲のピーク値ではありません。
+      </p>
       <table class="report-table">
         <thead>
           <tr>
             <th>関節</th>
             <th>左 (°)</th>
             <th>右 (°)</th>
-            <th>評価</th>
+            <th>左右差評価</th>
           </tr>
         </thead>
         <tbody>
           ${renderDetailRows(summary)}
         </tbody>
       </table>
+      ` : ''}
 
       <h2>💡 分析コメント</h2>
       <div class="report-comments">

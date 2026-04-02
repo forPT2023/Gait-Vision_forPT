@@ -1,4 +1,4 @@
-export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => performance.now() }) {
+export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => performance.now(), offset = 0 }) {
   if (hasStream) {
     return now();
   }
@@ -8,7 +8,7 @@ export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => perf
     return 0;
   }
 
-  return Math.max(0, safeCurrentTime * 1000);
+  return Math.max(0, safeCurrentTime * 1000 + offset);
 }
 
 export function getSourceMode({ hasStream, videoFileUrl }) {
