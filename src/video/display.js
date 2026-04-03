@@ -131,3 +131,43 @@ export function syncCanvasDisplaySize({
   canvasElement.style.width = `${cssWidth}px`;
   canvasElement.style.height = `${cssHeight}px`;
 }
+
+/**
+ * Calculate the "object-fit: contain" draw rectangle for a video on a canvas.
+ *
+ * drawImage(video, rect.x, rect.y, rect.w, rect.h) + landmark scaling via
+ *   px = rect.x + landmark.x * rect.w
+ *   py = rect.y + landmark.y * rect.h
+ * guarantees pixel-perfect alignment regardless of canvas vs video aspect ratio.
+ *
+ * When videoW or videoH is 0/unknown the full canvas is returned as fallback.
+ *
+ * @param {number} canvasW  Canvas pixel width
+ * @param {number} canvasH  Canvas pixel height
+ * @param {number} videoW   Video intrinsic width  (videoElement.videoWidth)
+ * @param {number} videoH   Video intrinsic height (videoElement.videoHeight)
+ * @returns {{ x: number, y: number, w: number, h: number }}
+ */
+export function calcVideoDrawRect(canvasW, canvasH, videoW, videoH) {
+  if (!(videoW > 0 && videoH > 0)) {
+    return { x: 0, y: 0, w: canvasW, h: canvasH };
+  }
+  const videoAR  = videoW  / videoH;
+  const canvasAR = canvasW / canvasH;
+  let drawW, drawH;
+  if (canvasAR > videoAR) {
+    // Canvas is wider than video → pillarbox (left/right black bars)
+    drawH = canvasH;
+    drawW = canvasH * videoAR;
+  } else {
+    // Canvas is taller than video (or exact match) → letterbox (top/bottom bars)
+    drawW = canvasW;
+    drawH = canvasW / videoAR;
+  }
+  return {
+    x: (canvasW - drawW) / 2,
+    y: (canvasH - drawH) / 2,
+    w: drawW,
+    h: drawH
+  };
+}
