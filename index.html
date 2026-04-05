@@ -1322,7 +1322,8 @@
           if (poseLandmarker) {
             try {
               const mpTimestamp = getCurrentMediaPipeTimestamp();
-              const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
+              // canvasElement を渡すことで drawImage と同じフレームを MediaPipe に処理させる
+              const results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
 
               // await 完了後に再チェック：解析が開始されていたら描画をスキップ
               if (isAnalyzing) {
@@ -1911,16 +1912,20 @@
           // ── このフレームを先に描画してからdetectForVideoを呼ぶ ──────────────
           // detectForVideo は async で数十ms かかる間も動画は進み続けるため、
           // await 後に drawImage すると描画フレームがランドマークより先に進んでしまう。
-          // drawImage でこのフレームを canvas に固定 → detectForVideo を呼ぶ順にする。
+          // さらに重要: videoElement を直接 detectForVideo に渡すと GPU テクスチャの
+          // ダブルバッファリングにより MediaPipe が 1〜2 フレーム先の映像を読む可能性がある。
+          // 修正: drawImage でこのフレームを canvas に固定 → canvas を detectForVideo に渡す。
+          // これにより canvas に描画されたフレームと MediaPipe が処理するフレームが完全に一致する。
           const analysisVW = videoElement.videoWidth;
           const analysisVH = videoElement.videoHeight;
           const analysisRect = calcVideoDrawRect(analysisCanvasW, analysisCanvasH, analysisVW, analysisVH);
           canvasCtx.clearRect(0, 0, analysisCanvasW, analysisCanvasH);
           canvasCtx.drawImage(videoElement, analysisRect.x, analysisRect.y, analysisRect.w, analysisRect.h);
-          // drawImage 直後（= このフレームのcurrentTime）のタイムスタンプで検出
-          const detectTimestamp = getCurrentMediaPipeTimestamp();
 
-          const results = await poseLandmarker.detectForVideo(videoElement, detectTimestamp);
+          // canvasElement を渡すことで MediaPipe は drawImage したフレームと同じピクセルを処理する。
+          // videoElement を渡すとGPUバッファリングで1フレーム先の映像を読むことがある。
+          // mpTimestamp はフレーム先頭で取得済みのため、ここでも同じ値を使う。
+          const results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
 
           if (frameCount % 30 === 0) {
             console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
