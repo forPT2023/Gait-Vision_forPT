@@ -1771,6 +1771,14 @@
           mpTimestampOffset = 0;
         }
 
+        // ── 解析開始直前にcanvasサイズを動画に合わせて確定させる ───────────────
+        // isAnalyzing = true にする前に必ず呼ぶこと！
+        // resizeCanvas() 内部で isAnalyzing=true のときはスキップするガードがあるため、
+        // isAnalyzing を true にした後では resizeCanvas() が無効化されてしまう。
+        // 解析開始時点で videoWidth/videoHeight に合わせてリサイズし、
+        // 以降の描画はその固定値を使う。
+        resizeCanvas();
+
       // Reset analysis state
         isAnalyzing = true;
         analysisPlane = currentPlane;
@@ -1800,13 +1808,6 @@
           const recordBtn = document.getElementById('btn-record');
           setRecordButtonForActiveAnalysis(recordBtn);
         }
-
-        // ── 解析開始直前にcanvasサイズを動画に合わせて確定させる ───────────────
-        // resizeCanvas() は window.resize でも呼ばれるため、解析中にcanvas
-        // サイズが変わってランドマーク座標がずれる可能性がある。
-        // 解析開始時点で必ず videoWidth/videoHeight に合わせてリサイズし、
-        // 以降の描画はその固定値を使う。
-        resizeCanvas();
 
         // 解析ループ内で canvasElement.width/height を毎回参照すると
         // resize イベントで変わった場合にズレるため、開始時点の値を固定する。
