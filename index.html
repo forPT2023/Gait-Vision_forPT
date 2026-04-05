@@ -1322,8 +1322,7 @@
           if (poseLandmarker) {
             try {
               const mpTimestamp = getCurrentMediaPipeTimestamp();
-              // canvasElement を渡すことで drawImage と同じフレームを MediaPipe に処理させる
-              const results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
+              const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
 
               // await 完了後に再チェック：解析が開始されていたら描画をスキップ
               if (isAnalyzing) {
@@ -1837,10 +1836,29 @@
         // resize イベントで変わった場合にズレるため、開始時点の値を固定する。
         const analysisCanvasW = canvasElement.width;
         const analysisCanvasH = canvasElement.height;
+        // CSS表示サイズも記録してピクセル vs CSS のズレを診断
+        const _cssDiag = {
+          pixelW: analysisCanvasW,
+          pixelH: analysisCanvasH,
+          cssW: parseFloat(canvasElement.style.width) || canvasElement.offsetWidth,
+          cssH: parseFloat(canvasElement.style.height) || canvasElement.offsetHeight,
+          offsetW: canvasElement.offsetWidth,
+          offsetH: canvasElement.offsetHeight,
+          dpr: window.devicePixelRatio,
+          containerW: document.getElementById('canvas-container')?.clientWidth,
+          containerH: document.getElementById('canvas-container')?.clientHeight,
+          videoW: videoElement.videoWidth,
+          videoH: videoElement.videoHeight,
+        };
         console.log('[Analysis] Canvas locked at', analysisCanvasW, 'x', analysisCanvasH,
           '| video:', videoElement.videoWidth, 'x', videoElement.videoHeight,
           '| arMatch:', Math.abs(videoElement.videoWidth / videoElement.videoHeight
             - analysisCanvasW / analysisCanvasH) < 0.002 ? 'OK ✓' : 'MISMATCH ⚠ (will cause marker offset)');
+        console.log('[DiagCSS] pixel:', _cssDiag.pixelW, 'x', _cssDiag.pixelH,
+          '| cssStyle:', _cssDiag.cssW, 'x', _cssDiag.cssH,
+          '| offsetSize:', _cssDiag.offsetW, 'x', _cssDiag.offsetH,
+          '| DPR:', _cssDiag.dpr,
+          '| container:', _cssDiag.containerW, 'x', _cssDiag.containerH);
 
         let frameCount = 0;
         let lastMpTimestamp = -1;
@@ -1922,10 +1940,10 @@
           canvasCtx.clearRect(0, 0, analysisCanvasW, analysisCanvasH);
           canvasCtx.drawImage(videoElement, analysisRect.x, analysisRect.y, analysisRect.w, analysisRect.h);
 
-          // canvasElement を渡すことで MediaPipe は drawImage したフレームと同じピクセルを処理する。
-          // videoElement を渡すとGPUバッファリングで1フレーム先の映像を読むことがある。
-          // mpTimestamp はフレーム先頭で取得済みのため、ここでも同じ値を使う。
-          const results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
+          // videoElement を detectForVideo に渡す（runningMode:'VIDEO' はHTMLVideoElementを要求する）。
+          // drawImage より前に detectForVideo を呼ぶとフレームがズレるため、
+          // drawImage でcanvasにフレームを固定してからvideoElementを渡す。
+          const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
 
           if (frameCount % 30 === 0) {
             console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
@@ -1935,15 +1953,23 @@
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
 
-            // ── マーカーズレ診断ログ（最初の3フレームのみ） ────────────────
-            if (frameCount <= 3) {
+            // ── マーカーズレ診断ログ（最初の10フレーム＋30フレームおき） ────────
+            if (frameCount <= 10 || frameCount % 30 === 0) {
               const lmHip = landmarks[LM.LEFT_HIP];
+              const lmNose = landmarks[LM.NOSE];
+              const mpNormW = analysisVW;
+              const mpNormH = analysisVH;
+              const drawW   = analysisRect.w;
+              const drawH   = analysisRect.h;
+              const scaleRatioX = drawW / mpNormW;
+              const scaleRatioY = drawH / mpNormH;
               console.log('[Align] frame', frameCount,
-                '| videoSize:', analysisVW, 'x', analysisVH,
-                '| canvas:', analysisCanvasW, 'x', analysisCanvasH,
-                '| rect:', JSON.stringify({x:Math.round(analysisRect.x),y:Math.round(analysisRect.y),w:Math.round(analysisRect.w),h:Math.round(analysisRect.h)}),
-                lmHip ? '| leftHip: (' + lmHip.x.toFixed(3) + ', ' + lmHip.y.toFixed(3) + ')'
-                       + ' → px: (' + Math.round(analysisRect.x + lmHip.x * analysisRect.w) + ', ' + Math.round(analysisRect.y + lmHip.y * analysisRect.h) + ')' : ''
+                '| normBy:', mpNormW, 'x', mpNormH,
+                '| drawRect:', Math.round(drawW), 'x', Math.round(drawH),
+                '| scale:', scaleRatioX.toFixed(4), '/', scaleRatioY.toFixed(4),
+                '| offset:', Math.round(analysisRect.x), ',', Math.round(analysisRect.y),
+                lmHip  ? '| hip.x='  + lmHip.x.toFixed(3)  + '→px=' + Math.round(analysisRect.x + lmHip.x  * drawW) : '',
+                lmNose ? '| nose.x=' + lmNose.x.toFixed(3) + '→px=' + Math.round(analysisRect.x + lmNose.x * drawW) : ''
               );
             }
 
