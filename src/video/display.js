@@ -96,14 +96,37 @@ export function calculateCanvasLayout({
     const wUnit = sourceWidth  / g;  // e.g. 9 for 1080×1920
     const hUnit = sourceHeight / g;  // e.g. 16 for 1080×1920
 
-    // Largest integer multiplier that fits inside the target pixel box
-    const n = Math.max(1, Math.min(
-      Math.floor(targetPixelWidth  / wUnit),
-      Math.floor(targetPixelHeight / hUnit)
-    ));
+    // Largest integer multiplier that fits inside the target pixel box.
+    //
+    // EDGE CASE: When GCD(sourceWidth, sourceHeight) = 1 (e.g. 1470×923) the
+    // unit tile equals the full source resolution.  If targetPixelWidth <
+    // wUnit (which happens on small-screen devices where the container is
+    // much smaller than the source), Math.floor(targetPixelWidth/wUnit) = 0,
+    // Math.min(0,0) = 0, and Math.max(1,0) = 1 → pixelWidth = wUnit = 1470.
+    // This makes the canvas far larger than the CSS display size, breaking the
+    // CSS/pixel aspect-ratio match and causing a visible marker offset.
+    //
+    // Fix: when n would be 0, fall back to fitting targetPixelWidth/Height
+    // directly while preserving sourceAspectRatio (same as the no-source path).
+    const nW = Math.floor(targetPixelWidth  / wUnit);
+    const nH = Math.floor(targetPixelHeight / hUnit);
+    const n  = Math.min(nW, nH);
 
-    pixelWidth  = n * wUnit;
-    pixelHeight = n * hUnit;
+    if (n >= 1) {
+      pixelWidth  = n * wUnit;
+      pixelHeight = n * hUnit;
+    } else {
+      // GCD unit is larger than the target box – use sourceAR-constrained target.
+      if (targetPixelWidth * hUnit <= targetPixelHeight * wUnit) {
+        // Width is the tighter constraint
+        pixelWidth  = targetPixelWidth;
+        pixelHeight = Math.max(1, Math.round(targetPixelWidth / sourceAspectRatio));
+      } else {
+        // Height is the tighter constraint
+        pixelHeight = targetPixelHeight;
+        pixelWidth  = Math.max(1, Math.round(targetPixelHeight * sourceAspectRatio));
+      }
+    }
   } else {
     pixelWidth  = Math.max(1, Math.round(cssWidth  * scale));
     pixelHeight = Math.max(1, Math.round(cssHeight * scale));
