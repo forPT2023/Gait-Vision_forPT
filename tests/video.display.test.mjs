@@ -155,3 +155,55 @@ test('calcVideoDrawRect: drawW/drawH are centered within canvas', () => {
   // centered: y = (700 - 225) / 2 = 237.5
   assert.ok(Math.abs(rect.y - (700 - rect.h) / 2) < 0.01);
 });
+
+// ── GCD=1 edge case (e.g. 1470×923 source on small-screen device) ────────────
+
+test('calculateCanvasLayout: GCD=1 source does NOT exceed target pixel size (mobile small container)', () => {
+  // Source resolution 1470×923 has GCD=1, so wUnit=1470, hUnit=923.
+  // On a mobile device with container=416px and DPR=3.53 (capped to 2),
+  // targetPixelWidth=832 < wUnit=1470 → old code produced n=1 → pixelWidth=1470 (too large!).
+  // Fixed code should fall back to targetPixelWidth-based sizing.
+  const layout = calculateCanvasLayout({
+    containerWidth: 416,
+    containerHeight: 600,
+    sourceWidth: 1470,
+    sourceHeight: 923,
+    devicePixelRatio: 3.53
+  });
+
+  // pixelWidth must fit within the target pixel box (≤ targetPixelWidth = round(416*2) = 832)
+  assert.ok(layout.pixelWidth <= 832,
+    `pixelWidth ${layout.pixelWidth} must be ≤ 832 (targetPixelWidth); got ${layout.pixelWidth}`);
+  assert.ok(layout.pixelHeight <= 522,
+    `pixelHeight ${layout.pixelHeight} must be ≤ 522 (targetPixelHeight); got ${layout.pixelHeight}`);
+
+  // CSS size should match the container-derived size
+  assert.ok(Math.abs(layout.cssWidth - 416) < 0.1,
+    `cssWidth should be ~416, got ${layout.cssWidth}`);
+
+  // Pixel AR should closely match source AR (1470/923 = 1.5926)
+  const sourceAR = 1470 / 923;
+  const pixelAR  = layout.pixelWidth / layout.pixelHeight;
+  assert.ok(Math.abs(pixelAR - sourceAR) < 0.01,
+    `pixelAR ${pixelAR.toFixed(4)} should be close to sourceAR ${sourceAR.toFixed(4)}`);
+});
+
+test('calculateCanvasLayout: GCD=1 source pixel size matches CSS size ratio (no invisible oversizing)', () => {
+  // canvas.width >> canvas.style.width causes MediaPipe landmarks to appear offset
+  // because the drawing scale is computed from canvas pixel size, not CSS size.
+  const layout = calculateCanvasLayout({
+    containerWidth: 416,
+    containerHeight: 600,
+    sourceWidth: 1470,
+    sourceHeight: 923,
+    devicePixelRatio: 3.53
+  });
+
+  const impliedDPRW = layout.pixelWidth  / layout.cssWidth;
+  const impliedDPRH = layout.pixelHeight / layout.cssHeight;
+  // Both implied DPR values must be ≤ maxDevicePixelRatio (default 2)
+  assert.ok(impliedDPRW <= 2.05,
+    `implied DPR (W) ${impliedDPRW.toFixed(3)} must be ≤ 2; pixelW=${layout.pixelWidth} cssW=${layout.cssWidth}`);
+  assert.ok(impliedDPRH <= 2.05,
+    `implied DPR (H) ${impliedDPRH.toFixed(3)} must be ≤ 2; pixelH=${layout.pixelHeight} cssH=${layout.cssHeight}`);
+});

@@ -1641,8 +1641,10 @@
 
           // Draw first frame if video is ready
           if (videoElement.readyState >= 2) {
+            const firstFrameRect = calcVideoDrawRect(canvasElement.width, canvasElement.height,
+              videoElement.videoWidth, videoElement.videoHeight);
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(videoElement, firstFrameRect.x, firstFrameRect.y, firstFrameRect.w, firstFrameRect.h);
             console.log('[Video] First frame drawn');
           } else {
             console.log('[Video] Video not fully ready yet, first frame will be drawn on play');
