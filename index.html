@@ -1908,20 +1908,23 @@
           // already be 0 after the seek).
           lastAnalysisMpTimestamp = lastMpTimestamp;
 
-          const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
-
-          if (frameCount % 30 === 0) {
-            console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
-          }
-
-          // Draw on canvas
-          // calcVideoDrawRect で object-fit:contain 相当の矩形を計算し
-          // drawImage と landmark 座標を完全に一致させる。
+          // ── このフレームを先に描画してからdetectForVideoを呼ぶ ──────────────
+          // detectForVideo は async で数十ms かかる間も動画は進み続けるため、
+          // await 後に drawImage すると描画フレームがランドマークより先に進んでしまう。
+          // drawImage でこのフレームを canvas に固定 → detectForVideo を呼ぶ順にする。
           const analysisVW = videoElement.videoWidth;
           const analysisVH = videoElement.videoHeight;
           const analysisRect = calcVideoDrawRect(analysisCanvasW, analysisCanvasH, analysisVW, analysisVH);
           canvasCtx.clearRect(0, 0, analysisCanvasW, analysisCanvasH);
           canvasCtx.drawImage(videoElement, analysisRect.x, analysisRect.y, analysisRect.w, analysisRect.h);
+          // drawImage 直後（= このフレームのcurrentTime）のタイムスタンプで検出
+          const detectTimestamp = getCurrentMediaPipeTimestamp();
+
+          const results = await poseLandmarker.detectForVideo(videoElement, detectTimestamp);
+
+          if (frameCount % 30 === 0) {
+            console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
+          }
 
           if (results.landmarks && results.landmarks.length > 0) {
             const landmarks = results.landmarks[0];
