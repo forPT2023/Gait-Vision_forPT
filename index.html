@@ -733,18 +733,11 @@
         return;
       }
 
-      const cW = canvasElement.width;
-      const cH = canvasElement.height;
-      const vW = sourceVideoElement.videoWidth;
-      const vH = sourceVideoElement.videoHeight;
-      const dr = calcVideoDrawRect(cW, cH, vW, vH);
-
-      canvasCtx.clearRect(0, 0, cW, cH);
-      canvasCtx.drawImage(sourceVideoElement, dr.x, dr.y, dr.w, dr.h);
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(sourceVideoElement, 0, 0, canvasElement.width, canvasElement.height);
 
       if (dataPoint?.landmarks?.length) {
-        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false,
-          canvasCtx, cW, cH, vW, vH);
+        drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false);
       }
     }
 
@@ -1117,54 +1110,24 @@
 
     // ctx / canvasW / canvasH を省略するとメイン canvas を使う（通常の解析描画）。
     // エクスポート時はオフスクリーン canvas の値を渡すことで画面を汚さない。
-    // ── 動画描画矩形（レターボックス対応） ────────────────────────────────────
-    // drawImage(video, 0, 0, canvasW, canvasH) は動画を canvas 全体に引き伸ばすが、
-    // videoW/videoH と canvasW/canvasH のアスペクト比が 1px でもずれると
-    // ランドマーク座標がずれる。そこで「object-fit: contain」相当の矩形を計算し、
-    // drawImage と landmark 座標変換の両方に同じ矩形を使うことで完全一致させる。
     //
-    // videoW / videoH が 0 の場合はフォールバックとして canvas 全体を使用。
-    function calcVideoDrawRect(canvasW, canvasH, videoW, videoH) {
-      if (!(videoW > 0 && videoH > 0)) {
-        // 動画寸法不明 → canvas 全体に描画（従来動作）
-        return { x: 0, y: 0, w: canvasW, h: canvasH };
-      }
-      const videoAR  = videoW  / videoH;
-      const canvasAR = canvasW / canvasH;
-      let drawW, drawH;
-      if (canvasAR > videoAR) {
-        // canvas が横長すぎ → 上下を使い切り、左右にレターボックス
-        drawH = canvasH;
-        drawW = canvasH * videoAR;
-      } else {
-        // canvas が縦長すぎ or ちょうど → 左右を使い切り、上下にレターボックス
-        drawW = canvasW;
-        drawH = canvasW / videoAR;
-      }
-      return {
-        x: (canvasW - drawW) / 2,
-        y: (canvasH - drawH) / 2,
-        w: drawW,
-        h: drawH
-      };
-    }
-
-    // videoW / videoH は MediaPipe がランドマーク正規化に使った動画の実寸法。
-    // calcVideoDrawRect で求めた描画矩形 (x, y, w, h) に drawImage を合わせ、
-    // ランドマーク座標も同じ矩形を基準に変換することで位置ずれをゼロにする。
+    // ── マーカー座標の方針 ───────────────────────────────────────────────────
+    // drawImage(video, 0, 0, canvasW, canvasH) で動画を canvas 全体に引き伸ばす。
+    // MediaPipe ランドマーク (0–1) は videoWidth/videoHeight を基準に正規化されているが、
+    // drawImage が canvas 全体を埋めるため landmark.x * canvasW が正しいピクセル位置になる。
+    // calculateCanvasLayout の GCD ロジックが canvas と動画の AR を一致させるため
+    // 引き伸ばしによる歪みも最小限に抑えられる。
     function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = false,
-                                   ctx = canvasCtx, canvasW = canvasElement.width, canvasH = canvasElement.height,
-                                   videoW = 0, videoH = 0) {
+                                   ctx = canvasCtx, canvasW = canvasElement.width, canvasH = canvasElement.height) {
       if (!landmarks || landmarks.length === 0) return;
 
       // ランドマーク正規化座標 (0–1) → キャンバスピクセル座標
-      // drawImage が video を drawRect に収めて描いているため、
-      // px = drawRect.x + lm.x * drawRect.w で正確な位置になる。
-      const drawRect = calcVideoDrawRect(canvasW, canvasH, videoW, videoH);
-      const offsetX  = drawRect.x;
-      const offsetY  = drawRect.y;
-      const scaleX   = drawRect.w;
-      const scaleY   = drawRect.h;
+      // drawImage が video 全体を (canvasW × canvasH) に引き伸ばしているため
+      // scaleX = canvasW, scaleY = canvasH で正しく一致する。
+      const offsetX = 0;
+      const offsetY = 0;
+      const scaleX  = canvasW;
+      const scaleY  = canvasH;
 
       // ── 全身骨格接続線（MediaPipe POSE_CONNECTIONS 相当・35本） ────────────
       // Canvas2D の lineTo で直接描画（DrawingUtils/WebGL より軽量）。
@@ -1196,13 +1159,19 @@
       });
       ctx.restore();
 
-      // ── キー関節：緑円（下半身＋肩） ────────────────────────────────────────
+      // ── キー関節：緑円（全身） ───────────────────────────────────────────────
       const keyJoints = [
+        LM.NOSE,
+        LM.LEFT_EYE,       LM.RIGHT_EYE,
+        LM.LEFT_EAR,       LM.RIGHT_EAR,
         LM.LEFT_SHOULDER,  LM.RIGHT_SHOULDER,
+        LM.LEFT_ELBOW,     LM.RIGHT_ELBOW,
+        LM.LEFT_WRIST,     LM.RIGHT_WRIST,
         LM.LEFT_HIP,       LM.RIGHT_HIP,
         LM.LEFT_KNEE,      LM.RIGHT_KNEE,
         LM.LEFT_ANKLE,     LM.RIGHT_ANKLE,
-        LM.LEFT_HEEL,      LM.RIGHT_HEEL
+        LM.LEFT_HEEL,      LM.RIGHT_HEEL,
+        LM.LEFT_FOOT_INDEX, LM.RIGHT_FOOT_INDEX
       ];
       ctx.save();
       keyJoints.forEach(idx => {
@@ -1324,14 +1293,8 @@
         }
 
         if (videoElement.readyState >= 2) {
-          const cW = canvasElement.width;
-          const cH = canvasElement.height;
-          const vW = videoElement.videoWidth;
-          const vH = videoElement.videoHeight;
-          const dr = calcVideoDrawRect(cW, cH, vW, vH);
-
-          canvasCtx.clearRect(0, 0, cW, cH);
-          canvasCtx.drawImage(videoElement, dr.x, dr.y, dr.w, dr.h);
+          canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+          canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
 
           // Detect and draw pose in preview mode
           if (poseLandmarker) {
@@ -1342,8 +1305,7 @@
               if (results.landmarks && results.landmarks.length > 0) {
                 const landmarks = results.landmarks[0];
                 const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
-                drawEnhancedLandmarks(landmarks, worldLandmarks, false,
-                  canvasCtx, cW, cH, vW, vH);
+                drawEnhancedLandmarks(landmarks, worldLandmarks, false);
 
                 const deltaT = (previewPrevMpTimestamp != null) ? (mpTimestamp - previewPrevMpTimestamp) : 0;
 
@@ -1649,11 +1611,8 @@
 
           // Draw first frame if video is ready
           if (videoElement.readyState >= 2) {
-            const cW = canvasElement.width;
-            const cH = canvasElement.height;
-            const dr = calcVideoDrawRect(cW, cH, videoElement.videoWidth, videoElement.videoHeight);
-            canvasCtx.clearRect(0, 0, cW, cH);
-            canvasCtx.drawImage(videoElement, dr.x, dr.y, dr.w, dr.h);
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
             console.log('[Video] First frame drawn');
           } else {
             console.log('[Video] Video not fully ready yet, first frame will be drawn on play');
@@ -1909,34 +1868,28 @@
           }
 
           // Draw on canvas
-          const cW = canvasElement.width;
-          const cH = canvasElement.height;
-          const vW = videoElement.videoWidth;
-          const vH = videoElement.videoHeight;
-          const dr = calcVideoDrawRect(cW, cH, vW, vH);
-
-          canvasCtx.clearRect(0, 0, cW, cH);
-          canvasCtx.drawImage(videoElement, dr.x, dr.y, dr.w, dr.h);
+          canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+          canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
 
           if (results.landmarks && results.landmarks.length > 0) {
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
 
             // ── マーカーズレ診断ログ（最初の3フレームのみ） ────────────────
-            // drawRect により videoAR と canvasAR が異なっても正確に一致する。
             if (frameCount <= 3) {
               const lmHip = landmarks[LM.LEFT_HIP];
               console.log('[Align] frame', frameCount,
-                '| videoSize:', vW, 'x', vH,
-                '| canvasSize:', cW, 'x', cH,
-                '| drawRect:', dr.x.toFixed(1), dr.y.toFixed(1), dr.w.toFixed(1), dr.h.toFixed(1),
-                lmHip ? '| leftHip normalized: (' + lmHip.x.toFixed(3) + ', ' + lmHip.y.toFixed(3) + ')'
-                       + ' → canvas px: (' + Math.round(dr.x + lmHip.x * dr.w) + ', ' + Math.round(dr.y + lmHip.y * dr.h) + ')' : ''
+                '| videoSize:', videoElement.videoWidth, 'x', videoElement.videoHeight,
+                '| canvasSize:', canvasElement.width, 'x', canvasElement.height,
+                '| videoAR:', (videoElement.videoWidth / videoElement.videoHeight).toFixed(4),
+                '| canvasAR:', (canvasElement.width / canvasElement.height).toFixed(4),
+                '| arMatch:', Math.abs(videoElement.videoWidth / videoElement.videoHeight - canvasElement.width / canvasElement.height) < 0.002 ? 'OK' : 'MISMATCH ⚠',
+                lmHip ? '| leftHip: (' + lmHip.x.toFixed(3) + ', ' + lmHip.y.toFixed(3) + ')'
+                       + ' → px: (' + Math.round(lmHip.x * canvasElement.width) + ', ' + Math.round(lmHip.y * canvasElement.height) + ')' : ''
               );
             }
 
-            drawEnhancedLandmarks(landmarks, worldLandmarks, false,
-              canvasCtx, cW, cH, vW, vH);
+            drawEnhancedLandmarks(landmarks, worldLandmarks, false);
 
             const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
             // 前額面では関節角度を計算しない（カメラが正面向きのため矢状面角度は無意味）
@@ -2384,28 +2337,21 @@
           // ── オフスクリーン ctx へ描画（メイン canvas は汚さない） ───────────
           const expW = exportCanvas.width;
           const expH = exportCanvas.height;
-          const expVW = exportVideoElement.videoWidth  || analysisVideoWidth  || expW;
-          const expVH = exportVideoElement.videoHeight || analysisVideoHeight || expH;
-          const expDr = calcVideoDrawRect(expW, expH, expVW, expVH);
 
           exportCtx.clearRect(0, 0, expW, expH);
-          exportCtx.drawImage(exportVideoElement, expDr.x, expDr.y, expDr.w, expDr.h);
+          exportCtx.drawImage(exportVideoElement, 0, 0, expW, expH);
           lastRenderedTime = currentVideoTime;
 
           if (dataPoint?.landmarks?.length) {
-            // ctx / canvasW / canvasH をオフスクリーン値で渡すため画面は変化しない
-            // ランドマーク座標は解析時 analysisVideoWidth/Height で正規化された値。
-            // exportCanvas は analysisVideoWidth/Height サイズで作成されているため
-            // expVW/expVH = analysisVideoWidth/Height = expW/expH となり drawRect は全域。
+            // exportCanvas は analysisVideoWidth/Height と同サイズで作成されているため
+            // landmark.x * expW が正確なピクセル位置になる。
             drawEnhancedLandmarks(
               dataPoint.landmarks,
               dataPoint.worldLandmarks || null,
               false,
               exportCtx,
               expW,
-              expH,
-              expVW,
-              expVH
+              expH
             );
           }
 
@@ -2471,11 +2417,8 @@
           const firstDataPoint = findInterpolatedAnalysisPoint(analysisData, 0);
           const expW0 = exportCanvas.width;
           const expH0 = exportCanvas.height;
-          const expVW0 = exportVideoElement.videoWidth  || analysisVideoWidth  || expW0;
-          const expVH0 = exportVideoElement.videoHeight || analysisVideoHeight || expH0;
-          const expDr0 = calcVideoDrawRect(expW0, expH0, expVW0, expVH0);
           exportCtx.clearRect(0, 0, expW0, expH0);
-          exportCtx.drawImage(exportVideoElement, expDr0.x, expDr0.y, expDr0.w, expDr0.h);
+          exportCtx.drawImage(exportVideoElement, 0, 0, expW0, expH0);
           if (firstDataPoint?.landmarks?.length) {
             drawEnhancedLandmarks(
               firstDataPoint.landmarks,
@@ -2483,9 +2426,7 @@
               false,
               exportCtx,
               expW0,
-              expH0,
-              expVW0,
-              expVH0
+              expH0
             );
           }
         }
