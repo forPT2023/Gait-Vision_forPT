@@ -1,8 +1,8 @@
 // Service Worker for Gait VISION forPT
-// Version: 3.10.6-pwa1
+// Version: 3.10.7-pwa1
 // Purpose: Cache all external CDN resources for offline operation
 
-const CACHE_VERSION = 'gait-vision-v3.10.6-pwa1';
+const CACHE_VERSION = 'gait-vision-v3.10.7-pwa1';
 const CACHE_NAME = `gait-vision-cache-${CACHE_VERSION}`;
 
 const LOCAL_RESOURCES = [

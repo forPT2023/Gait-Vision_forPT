@@ -1235,14 +1235,10 @@
     async function initPoseLandmarker() {
       console.log('[MediaPipe] Initializing...');
       try {
+        // 注意: poseLandmarker.close() は WebGL コンテキストを破棄するため呼ばない。
+        // 既存インスタンスがあれば null にして GC に任せる（close は呼ばない）。
         if (poseLandmarker) {
-          console.log('[MediaPipe] Closing previous instance...');
-          try {
-            await poseLandmarker.close();
-            console.log('[MediaPipe] Previous instance closed');
-          } catch (e) {
-            console.warn('[MediaPipe] Error closing previous instance:', e);
-          }
+          console.log('[MediaPipe] Replacing previous instance (not closing to preserve WebGL context)');
           poseLandmarker = null;
         }
 
@@ -1406,13 +1402,12 @@
           releaseCamera();
         }
 
-        // Initialize or reinitialize MediaPipe to reset timestamp tracking
+        // MediaPipe は初回のみ初期化（再初期化は WebGL context lost を引き起こす）。
         if (!poseLandmarker) {
           console.log('[Camera] Initializing MediaPipe for first time...');
           await initPoseLandmarker();
         } else {
-          console.log('[Camera] Reinitializing MediaPipe for camera mode...');
-          await initPoseLandmarker();
+          console.log('[Camera] MediaPipe already initialized — reusing existing instance');
         }
 
         const constraints = buildCameraConstraints({
@@ -1627,13 +1622,15 @@
             }
           };
 
-          // Initialize or reinitialize MediaPipe to reset timestamp tracking
+          // MediaPipe は初回のみ初期化する。
+          // 動画を切り替えるたびに close() → 再初期化すると WebGL コンテキストが
+          // 破壊され「WebGL: context lost」→「program.name=id」エラーが連鎖する。
+          // タイムスタンプのリセットは startAnalysis() 内の mpTimestampOffset で行う。
           if (!poseLandmarker) {
             console.log('[Video] Initializing MediaPipe for first time...');
             await initPoseLandmarker();
           } else {
-            console.log('[Video] Reinitializing MediaPipe for video mode...');
-            await initPoseLandmarker();
+            console.log('[Video] MediaPipe already initialized — reusing existing instance');
           }
 
           // Resize canvas and draw first frame
@@ -3145,9 +3142,15 @@
     window.visualViewport?.addEventListener('resize', handleViewportChange);
 
     // Memory cleanup every 5 minutes (idle only, never interrupt an active session)
+    // Note: poseLandmarker.close() destroys the WebGL context, so we skip re-init here.
+    // The instance stays alive until the page is reloaded.
     setInterval(async () => {
-      if (!isRecording && !isAnalyzing && getAnalysisSourceMode() === 'idle' && poseLandmarker) {
-        await initPoseLandmarker();
+      if (!isRecording && !isAnalyzing && getAnalysisSourceMode() === 'idle') {
+        // No-op: avoid close() which causes WebGL context loss on next use.
+        // If poseLandmarker is null for some reason, re-init it.
+        if (!poseLandmarker) {
+          await initPoseLandmarker();
+        }
       }
     }, 300000);
 
