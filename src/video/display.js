@@ -97,17 +97,9 @@ export function calculateCanvasLayout({
     const hUnit = sourceHeight / g;  // e.g. 16 for 1080×1920
 
     // Largest integer multiplier that fits inside the target pixel box.
-    //
-    // EDGE CASE: When GCD(sourceWidth, sourceHeight) = 1 (e.g. 1470×923) the
-    // unit tile equals the full source resolution.  If targetPixelWidth <
-    // wUnit (which happens on small-screen devices where the container is
-    // much smaller than the source), Math.floor(targetPixelWidth/wUnit) = 0,
-    // Math.min(0,0) = 0, and Math.max(1,0) = 1 → pixelWidth = wUnit = 1470.
-    // This makes the canvas far larger than the CSS display size, breaking the
-    // CSS/pixel aspect-ratio match and causing a visible marker offset.
-    //
-    // Fix: when n would be 0, fall back to fitting targetPixelWidth/Height
-    // directly while preserving sourceAspectRatio (same as the no-source path).
+    // When GCD=1 (e.g. 1470×923), wUnit/hUnit equal the full source size.
+    // If the container is smaller than the source, n would be 0.
+    // In that case fall back to scaling to fit the target box while preserving AR.
     const nW = Math.floor(targetPixelWidth  / wUnit);
     const nH = Math.floor(targetPixelHeight / hUnit);
     const n  = Math.min(nW, nH);
@@ -116,13 +108,11 @@ export function calculateCanvasLayout({
       pixelWidth  = n * wUnit;
       pixelHeight = n * hUnit;
     } else {
-      // GCD unit is larger than the target box – use sourceAR-constrained target.
+      // Unit tile larger than target box — scale to fit while preserving AR.
       if (targetPixelWidth * hUnit <= targetPixelHeight * wUnit) {
-        // Width is the tighter constraint
         pixelWidth  = targetPixelWidth;
         pixelHeight = Math.max(1, Math.round(targetPixelWidth / sourceAspectRatio));
       } else {
-        // Height is the tighter constraint
         pixelHeight = targetPixelHeight;
         pixelWidth  = Math.max(1, Math.round(targetPixelHeight * sourceAspectRatio));
       }
