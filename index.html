@@ -511,7 +511,7 @@
     import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findInterpolatedAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
-    console.log(`${APP_VERSION_LABEL} (Fixed: Canvas Size & Graph Accuracy) - Initializing...`);
+    console.log(`${APP_VERSION_LABEL} (Fixed: Canvas Size & Marker Alignment) - Initializing...`);
 
 
     // Global state
@@ -1322,7 +1322,10 @@
           if (poseLandmarker) {
             try {
               const mpTimestamp = getCurrentMediaPipeTimestamp();
-              const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
+              // canvasElement を detectForVideo に渡すことで GPU ダブルバッファリングによる
+              // フレームズレを回避する。canvas には drawImage で現在フレームが固定されている。
+              // landmarks は canvas サイズ (previewW x previewH) で正規化される。
+              const results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
 
               // await 完了後に再チェック：解析が開始されていたら描画をスキップ
               if (isAnalyzing) {
@@ -1334,8 +1337,10 @@
               if (results.landmarks && results.landmarks.length > 0) {
                 const landmarks = results.landmarks[0];
                 const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
+                // canvas を入力にしたため landmarks は canvas サイズで正規化されている。
+                // videoW/videoH に canvas サイズを渡すことで座標変換が一致する。
                 drawEnhancedLandmarks(landmarks, worldLandmarks, false,
-                  canvasCtx, previewW, previewH, previewVW, previewVH);
+                  canvasCtx, previewW, previewH, previewW, previewH);
 
                 const deltaT = (previewPrevMpTimestamp != null) ? (mpTimestamp - previewPrevMpTimestamp) : 0;
 
@@ -1920,7 +1925,7 @@
             analysisVideoWidth  = videoElement.videoWidth;
             analysisVideoHeight = videoElement.videoHeight;
             console.log('[Analysis] First frame: videoSize', analysisVideoWidth, 'x', analysisVideoHeight,
-              '| canvasSize', canvasElement.width, 'x', canvasElement.height);
+              '| canvasSize(normRef)', analysisCanvasW, 'x', analysisCanvasH);
           }
           const elapsedMs = framePlan.elapsedMs;
           lastMpTimestamp = framePlan.nextLastMpTimestamp;
@@ -1930,22 +1935,22 @@
           lastAnalysisMpTimestamp = lastMpTimestamp;
 
           // ── このフレームを先に描画してからdetectForVideoを呼ぶ ──────────────
-          // detectForVideo は async で数十ms かかる間も動画は進み続けるため、
-          // await 後に drawImage すると描画フレームがランドマークより先に進んでしまう。
-          // さらに重要: videoElement を直接 detectForVideo に渡すと GPU テクスチャの
+          // 重要: videoElement を直接 detectForVideo に渡すと GPU テクスチャの
           // ダブルバッファリングにより MediaPipe が 1〜2 フレーム先の映像を読む可能性がある。
-          // 修正: drawImage でこのフレームを canvas に固定 → canvas を detectForVideo に渡す。
+          // 修正: drawImage でこのフレームを canvas に固定 → canvasElement を detectForVideo に渡す。
           // これにより canvas に描画されたフレームと MediaPipe が処理するフレームが完全に一致する。
+          // detectForVideo の ImageSource は TexImageSource であり、HTMLCanvasElement も受け付ける。
           const analysisVW = videoElement.videoWidth;
           const analysisVH = videoElement.videoHeight;
           const analysisRect = calcVideoDrawRect(analysisCanvasW, analysisCanvasH, analysisVW, analysisVH);
           canvasCtx.clearRect(0, 0, analysisCanvasW, analysisCanvasH);
           canvasCtx.drawImage(videoElement, analysisRect.x, analysisRect.y, analysisRect.w, analysisRect.h);
 
-          // videoElement を detectForVideo に渡す（runningMode:'VIDEO' はHTMLVideoElementを要求する）。
-          // drawImage より前に detectForVideo を呼ぶとフレームがズレるため、
-          // drawImage でcanvasにフレームを固定してからvideoElementを渡す。
-          const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
+          // canvasElement を detectForVideo に渡す。
+          // canvas には現在のフレームが描画済みのため、MediaPipe が処理するフレームと
+          // 表示フレームが完全に一致する（GPU ダブルバッファリング問題を回避）。
+          // canvas を渡した場合、landmarks は canvas の解像度（analysisCanvasW x analysisCanvasH）で正規化される。
+          const results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
 
           if (frameCount % 30 === 0) {
             console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
@@ -1959,24 +1964,30 @@
             if (frameCount <= 10 || frameCount % 30 === 0) {
               const lmHip = landmarks[LM.LEFT_HIP];
               const lmNose = landmarks[LM.NOSE];
-              const mpNormW = analysisVW;
-              const mpNormH = analysisVH;
-              const drawW   = analysisRect.w;
-              const drawH   = analysisRect.h;
+              // canvasElement を detectForVideo に渡すため、landmark は canvas 解像度で正規化される
+              const mpNormW = analysisCanvasW;
+              const mpNormH = analysisCanvasH;
+              const drawW   = analysisCanvasW;
+              const drawH   = analysisCanvasH;
               const scaleRatioX = drawW / mpNormW;
               const scaleRatioY = drawH / mpNormH;
               console.log('[Align] frame', frameCount,
-                '| normBy:', mpNormW, 'x', mpNormH,
+                '| normBy(canvas):', mpNormW, 'x', mpNormH,
+                '| video:', analysisVW, 'x', analysisVH,
                 '| drawRect:', Math.round(drawW), 'x', Math.round(drawH),
                 '| scale:', scaleRatioX.toFixed(4), '/', scaleRatioY.toFixed(4),
                 '| offset:', Math.round(analysisRect.x), ',', Math.round(analysisRect.y),
-                lmHip  ? '| hip.x='  + lmHip.x.toFixed(3)  + '→px=' + Math.round(analysisRect.x + lmHip.x  * drawW) : '',
-                lmNose ? '| nose.x=' + lmNose.x.toFixed(3) + '→px=' + Math.round(analysisRect.x + lmNose.x * drawW) : ''
+                lmHip  ? '| hip.x='  + lmHip.x.toFixed(3)  + '→px=' + Math.round(lmHip.x  * drawW) : '',
+                lmNose ? '| nose.x=' + lmNose.x.toFixed(3) + '→px=' + Math.round(lmNose.x * drawW) : ''
               );
             }
 
+            // canvas を detectForVideo に渡しているため、landmarks は canvas 解像度で正規化されている。
+            // drawEnhancedLandmarks に canvas サイズ (analysisCanvasW/H) を videoW/videoH として渡すことで
+            // calcVideoDrawRect(canvasW, canvasH, canvasW, canvasH) = {x:0, y:0, w:canvasW, h:canvasH} となり
+            // landmark の正規化と描画スケールが完全に一致する。
             drawEnhancedLandmarks(landmarks, worldLandmarks, false,
-              canvasCtx, analysisCanvasW, analysisCanvasH, analysisVW, analysisVH);
+              canvasCtx, analysisCanvasW, analysisCanvasH, analysisCanvasW, analysisCanvasH);
 
             const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
             // 前額面では関節角度を計算しない（カメラが正面向きのため矢状面角度は無意味）
