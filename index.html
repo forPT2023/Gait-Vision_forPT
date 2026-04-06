@@ -1047,6 +1047,17 @@
         return;
       }
       const container = document.getElementById('canvas-container');
+      const containerW = container.clientWidth;
+      const containerH = container.clientHeight;
+
+      // canvas-container が display:none のとき clientWidth/Height = 0 になる。
+      // 0サイズで計算すると 1×1 px になり、解析開始時に極小キャンバスになるため
+      // コンテナが非表示のときはリサイズをスキップする。
+      if (containerW === 0 || containerH === 0) {
+        console.log('[Canvas] Resize skipped: container not visible (', containerW, 'x', containerH, ')');
+        return;
+      }
+
       const isPortraitViewport = window.innerHeight > window.innerWidth;
       const displaySource = resolveDisplaySourceDimensions({
         sourceWidth: videoElement.videoWidth,
@@ -1057,8 +1068,8 @@
         preferViewportOrientation: false
       });
       const layout = calculateCanvasLayout({
-        containerWidth: container.clientWidth,
-        containerHeight: container.clientHeight,
+        containerWidth: containerW,
+        containerHeight: containerH,
         sourceWidth: displaySource.width,
         sourceHeight: displaySource.height,
         devicePixelRatio: window.devicePixelRatio || 1,
@@ -1636,11 +1647,19 @@
           // Resize canvas and draw first frame
           resizeCanvas();
 
-          // Draw first frame if video is ready
+          // Draw first frame if video is ready (letterbox-aware)
           if (videoElement.readyState >= 2) {
+            const firstFrameRect = calcVideoDrawRect(
+              canvasElement.width, canvasElement.height,
+              videoElement.videoWidth, videoElement.videoHeight
+            );
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-            console.log('[Video] First frame drawn');
+            canvasCtx.drawImage(videoElement,
+              firstFrameRect.x, firstFrameRect.y, firstFrameRect.w, firstFrameRect.h);
+            console.log('[Video] First frame drawn (rect:', JSON.stringify({
+              x: Math.round(firstFrameRect.x), y: Math.round(firstFrameRect.y),
+              w: Math.round(firstFrameRect.w), h: Math.round(firstFrameRect.h)
+            }), ')');
           } else {
             console.log('[Video] Video not fully ready yet, first frame will be drawn on play');
           }
