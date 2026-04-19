@@ -1,0 +1,27 @@
+# Cloudflare Pages custom headers
+# すべてのリソースをキャッシュ禁止にしてデプロイ即時反映を保証する
+
+# ルートパス（/ → index.html として配信される）
+/
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+  Pragma: no-cache
+
+# index.html 直接アクセス
+/index.html
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+  Pragma: no-cache
+
+# Service Worker（最重要: 絶対にキャッシュさせない）
+/sw.js
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+  Pragma: no-cache
+
+# PWA マニフェスト
+/manifest.webmanifest
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+  Pragma: no-cache
+
+# JS モジュール群（src/ 配下すべて）
+/src/*
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+  Pragma: no-cache

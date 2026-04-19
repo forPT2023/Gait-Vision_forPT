@@ -5,49 +5,10 @@ import {
   buildAnalysisCsv,
   buildCsvExportFilename,
   buildPdfReportFilename,
-  buildSessionExport,
-  createBackupFilename,
   downloadBlobFile,
-  downloadJson,
-  formatCompactDate
+  formatCompactDate,
+  shareOrDownloadBlob
 } from '../src/storage/export.js';
-
-test('buildSessionExport returns metadata and session count', () => {
-  const payload = buildSessionExport({
-    sessions: [{ id: 1 }, { id: 2 }],
-    exportDate: '2026-03-23T00:00:00.000Z',
-    version: 'test-version'
-  });
-
-  assert.deepEqual(payload, {
-    exportDate: '2026-03-23T00:00:00.000Z',
-    version: 'test-version',
-    totalSessions: 2,
-    sessions: [{ id: 1 }, { id: 2 }]
-  });
-});
-
-test('buildSessionExport falls back to empty sessions for invalid input', () => {
-  const payload = buildSessionExport({
-    sessions: null,
-    exportDate: '2026-03-23T00:00:00.000Z',
-    version: 'test-version'
-  });
-
-  assert.deepEqual(payload, {
-    exportDate: '2026-03-23T00:00:00.000Z',
-    version: 'test-version',
-    totalSessions: 0,
-    sessions: []
-  });
-});
-
-test('createBackupFilename formats the date as YYYYMMDD', () => {
-  assert.equal(
-    createBackupFilename({ date: new Date('2026-03-23T12:34:56.000Z') }),
-    'gait_backup_20260323.json'
-  );
-});
 
 test('formatCompactDate returns YYYYMMDD for a UTC date', () => {
   assert.equal(
@@ -234,61 +195,6 @@ test('downloadBlobFile clicks a generated blob URL and revokes it later', () => 
   assert.equal(removed, 1);
 });
 
-test('downloadJson serializes payload and delegates to downloadBlobFile behavior', () => {
-  let createdBlob = null;
-  let revoked = null;
-  let clicked = false;
-  const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (fn) => {
-    fn();
-    return 1;
-  };
-
-  try {
-    downloadJson({
-      payload: { hello: 'world' },
-      filename: 'backup.json',
-      URLRef: {
-        createObjectURL(blob) {
-          createdBlob = blob;
-          return 'blob:json';
-        },
-        revokeObjectURL(url) {
-          revoked = url;
-        }
-      },
-      documentRef: {
-        createElement() {
-          return {
-            href: '',
-            download: '',
-            click() {
-              clicked = true;
-            }
-          };
-        }
-      }
-    });
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-  }
-
-  assert.equal(createdBlob.type, 'application/json');
-  assert.equal(revoked, 'blob:json');
-  assert.equal(clicked, true);
-});
-
-test('downloadJson rejects when Blob API is unavailable', () => {
-  assert.throws(
-    () => downloadJson({
-      payload: { hello: 'world' },
-      filename: 'backup.json',
-      BlobRef: null
-    }),
-    /Blob API is unavailable/
-  );
-});
-
 test('downloadBlobFile rejects when URL or document APIs are unavailable', () => {
   assert.throws(
     () => downloadBlobFile({
@@ -329,43 +235,6 @@ test('downloadBlobFile rejects when URL or document APIs are unavailable', () =>
     }),
     /Blob payload is required/
   );
-});
-
-test('downloadJson uses default filename when one is not provided', () => {
-  let filename = null;
-  const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (fn) => {
-    fn();
-    return 1;
-  };
-  try {
-    downloadJson({
-      payload: { hello: 'world' },
-      URLRef: {
-        createObjectURL() {
-          return 'blob:json';
-        },
-        revokeObjectURL() {}
-      },
-      documentRef: {
-        createElement() {
-          return {
-            set download(value) {
-              filename = value;
-            },
-            get download() {
-              return filename;
-            },
-            click() {}
-          };
-        }
-      }
-    });
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-  }
-
-  assert.equal(filename, 'export.json');
 });
 
 test('downloadBlobFile still cleans up and revokes URL when click throws', () => {
@@ -457,4 +326,184 @@ test('downloadBlobFile removes appended link via document body when parentNode i
   }
 
   assert.equal(removed, 1);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// shareOrDownloadBlob tests
+// ────────────────────────────────────────────────────────────────────────────
+
+test('shareOrDownloadBlob uses navigator.share on iOS when canShare returns true', async () => {
+  let sharedFiles = null;
+  const navigatorRef = {
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
+    canShare(data) { return Array.isArray(data?.files) && data.files.length > 0; },
+    async share(data) { sharedFiles = data.files; }
+  };
+  const URLRef = {
+    createObjectURL() { return 'blob:x'; },
+    revokeObjectURL() {}
+  };
+  const documentRef = {
+    body: { appendChild() {}, removeChild() {} },
+    createElement() { return { href: '', download: '', isConnected: false, click() {} }; }
+  };
+
+  const blob = new Blob(['hello'], { type: 'video/mp4' });
+  const result = await shareOrDownloadBlob({
+    blob,
+    filename: 'test.mp4',
+    URLRef,
+    documentRef,
+    navigatorRef
+  });
+
+  assert.equal(result, 'shared');
+  assert.ok(Array.isArray(sharedFiles));
+  assert.equal(sharedFiles.length, 1);
+  assert.equal(sharedFiles[0].name, 'test.mp4');
+});
+
+test('shareOrDownloadBlob uses navigator.share when forceShare=true even on non-iOS', async () => {
+  let sharedFiles = null;
+  const navigatorRef = {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    canShare(data) { return Array.isArray(data?.files) && data.files.length > 0; },
+    async share(data) { sharedFiles = data.files; }
+  };
+  const URLRef = {
+    createObjectURL() { return 'blob:x'; },
+    revokeObjectURL() {}
+  };
+  const documentRef = {
+    body: { appendChild() {}, removeChild() {} },
+    createElement() { return { href: '', download: '', isConnected: false, click() {} }; }
+  };
+
+  const blob = new Blob(['hello'], { type: 'video/mp4' });
+  const result = await shareOrDownloadBlob({
+    blob,
+    filename: 'test.mp4',
+    forceShare: true,
+    URLRef,
+    documentRef,
+    navigatorRef
+  });
+
+  assert.equal(result, 'shared');
+  assert.ok(Array.isArray(sharedFiles));
+  assert.equal(sharedFiles[0].name, 'test.mp4');
+});
+
+test('shareOrDownloadBlob falls back to download on non-iOS even when canShare returns true', async () => {
+  let clicked = false;
+  const navigatorRef = {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    canShare(data) { return Array.isArray(data?.files) && data.files.length > 0; },
+    async share() {}
+  };
+  const URLRef = {
+    createObjectURL() { return 'blob:x'; },
+    revokeObjectURL() {}
+  };
+  const documentRef = {
+    body: { appendChild() {} },
+    createElement() {
+      return {
+        href: '', download: '', isConnected: false,
+        parentNode: { removeChild() {} },
+        click() { clicked = true; }
+      };
+    }
+  };
+
+  const blob = new Blob(['hello'], { type: 'video/mp4' });
+  const result = await shareOrDownloadBlob({
+    blob,
+    filename: 'test.mp4',
+    URLRef,
+    documentRef,
+    navigatorRef
+  });
+
+  assert.equal(result, 'downloaded');
+  assert.ok(clicked);
+});
+
+test('shareOrDownloadBlob falls back to download when canShare returns false', async () => {
+  let clicked = false;
+  const navigatorRef = {
+    canShare() { return false; },
+    async share() {}
+  };
+  const URLRef = {
+    createObjectURL() { return 'blob:x'; },
+    revokeObjectURL() {}
+  };
+  const documentRef = {
+    body: { appendChild() {} },
+    createElement() {
+      return {
+        href: '', download: '', isConnected: false,
+        parentNode: { removeChild() {} },
+        click() { clicked = true; }
+      };
+    }
+  };
+
+  const blob = new Blob(['hello'], { type: 'video/mp4' });
+  const result = await shareOrDownloadBlob({
+    blob,
+    filename: 'test.mp4',
+    URLRef,
+    documentRef,
+    navigatorRef
+  });
+
+  assert.equal(result, 'downloaded');
+  assert.ok(clicked);
+});
+
+test('shareOrDownloadBlob falls back to download when navigator.share is unavailable', async () => {
+  let clicked = false;
+  const navigatorRef = {}; // no share/canShare
+  const URLRef = {
+    createObjectURL() { return 'blob:x'; },
+    revokeObjectURL() {}
+  };
+  const documentRef = {
+    body: { appendChild() {} },
+    createElement() {
+      return {
+        href: '', download: '', isConnected: false,
+        parentNode: { removeChild() {} },
+        click() { clicked = true; }
+      };
+    }
+  };
+
+  const blob = new Blob(['hello'], { type: 'video/mp4' });
+  const result = await shareOrDownloadBlob({
+    blob,
+    filename: 'test.mp4',
+    URLRef,
+    documentRef,
+    navigatorRef
+  });
+
+  assert.equal(result, 'downloaded');
+  assert.ok(clicked);
+});
+
+test('shareOrDownloadBlob throws when blob is null', async () => {
+  await assert.rejects(
+    () => shareOrDownloadBlob({ blob: null, filename: 'x.mp4' }),
+    /Blob payload is required/
+  );
+});
+
+test('shareOrDownloadBlob throws when filename is empty', async () => {
+  await assert.rejects(
+    () => shareOrDownloadBlob({ blob: new Blob(['a']), filename: '' }),
+    /Filename is required/
+  );
 });

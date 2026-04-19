@@ -149,7 +149,17 @@ export function buildReportHtml(summary) {
 
       ${renderPrimaryMetrics(summary)}
 
-
+      ${summary.reportPlane === 'sagittal' ? `
+      <h2>📊 関節角度グラフ</h2>
+      <div class="report-charts-row">
+        <div class="report-chart-box">
+          <canvas id="report-knee-chart" class="report-chart-mini"></canvas>
+        </div>
+        <div class="report-chart-box">
+          <canvas id="report-hip-chart" class="report-chart-mini"></canvas>
+        </div>
+      </div>
+      ` : ''}
 
       <h2>📈 時系列推移 <small style="font-size:0.72rem;color:#64748b;font-weight:normal;">${summary.reportPlane === 'sagittal' ? '※ 矢状面での歩行速度・対称性は参考値。信頼性は前額面より低い' : ''}</small></h2>
       <div class="report-chart-box">
@@ -158,10 +168,11 @@ export function buildReportHtml(summary) {
       ${summary.reportPlane === 'frontal' ? '' : '<p style="font-size:0.72rem;color:#94a3b8;margin:0.25rem 0 0.5rem 0;">歩行速度は股関節変位から推定。対称性は歩行イベント間隔から算出。いずれも計測誤差を含みます。</p>'}
 
       ${summary.reportPlane === 'sagittal' ? `
-      <h2>🦺 関節角度詳細</h2>
+      <h2>🦺 関節角度詳細（全フレーム平均）</h2>
       <p style="font-size:0.72rem;color:#64748b;margin:0 0 0.5rem 0;">
-        ※ 左右差の評価基準：膝−10°、足首−5°を超える差を「やや差あり」、中央値の2倍超を「左右差大」としています。
-        全歩行フレームの平均値であり、立脚中期またはスウィング最大屈曲のピーク値ではありません。
+        ※ 左右差の評価基準：膝 10°・足首 5° を超える差を「やや差あり」、その2倍超を「左右差大」としています。<br>
+        全歩行フレームの平均値（立脚・遊脚混在）のため、絶対値より<strong>左右差の比較・経時変化</strong>に活用してください。<br>
+        ⚠️ <strong>股関節角度は「肩−股関節−膝」の体幹-大腿角度（参考値）</strong>です。純粋な股関節屈伸角度ではなく、体幹前傾の影響を受けます。
       </p>
       <table class="report-table">
         <thead>

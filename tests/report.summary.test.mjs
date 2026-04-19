@@ -133,7 +133,12 @@ test('createReportSummary emits threshold-triggered comments in Japanese without
     currentPlane: 'frontal',
     patientId: 'PT-0003',
     stepCount: 2,
-    sessionTimestamp: Date.UTC(2026, 2, 23)
+    sessionTimestamp: Date.UTC(2026, 2, 23),
+    // 対称性コメントは gaitEvents が存在する場合のみ出力されるため、ダミーイベントを渡す
+    gaitEvents: [
+      { type: 'left_heel_strike', timestamp: 500 },
+      { type: 'right_heel_strike', timestamp: 1000 }
+    ]
   });
 
   // コメントはルールIDを含まない日本語メッセージのみ
@@ -160,7 +165,51 @@ test('createReportSummary marks zero-only placeholder metrics as not computed', 
   assert.equal(summary.metricAvailability.pelvis, true);
 });
 
-test('createReportSummary does not emit sagittal speed/cadence comment rules (removed from sagittal)', () => {
+test('createReportSummary: metricAvailability.symmetry is false when no gait events', () => {
+  // 歩行イベントがない場合、対称性は「未計算」として扱う
+  const summary = createReportSummary({
+    analysisData: [
+      { elapsedMs: 0, speed: 1.0, cadence: 110, symmetry: 100, trunk: 5, pelvis: 0,
+        leftKnee: 0, rightKnee: 0, leftHip: 0, rightHip: 0, leftAnkle: 0, rightAnkle: 0 }
+    ],
+    analysisPlane: 'frontal',
+    currentPlane: 'frontal',
+    patientId: 'PT-0006',
+    stepCount: 0,
+    sessionTimestamp: Date.UTC(2026, 2, 23),
+    gaitEvents: []  // 歩行イベントなし
+  });
+
+  assert.equal(summary.metricAvailability.symmetry, false,
+    'symmetry should be unavailable when no gait events detected');
+  // 対称性コメントも出力されないはず
+  assert.ok(!summary.comments.some((c) => c.includes('対称性')),
+    'symmetry comment should not appear when no gait events');
+});
+
+test('createReportSummary: metricAvailability.symmetry is true when gait events exist', () => {
+  // 歩行イベントがある場合、対称性は有効
+  const summary = createReportSummary({
+    analysisData: [
+      { elapsedMs: 0, speed: 1.0, cadence: 110, symmetry: 80, trunk: 5, pelvis: 0,
+        leftKnee: 0, rightKnee: 0, leftHip: 0, rightHip: 0, leftAnkle: 0, rightAnkle: 0 }
+    ],
+    analysisPlane: 'frontal',
+    currentPlane: 'frontal',
+    patientId: 'PT-0007',
+    stepCount: 2,
+    sessionTimestamp: Date.UTC(2026, 2, 23),
+    gaitEvents: [
+      { type: 'left_heel_strike', timestamp: 500 },
+      { type: 'right_heel_strike', timestamp: 1000 }
+    ]
+  });
+
+  assert.equal(summary.metricAvailability.symmetry, true,
+    'symmetry should be available when gait events are present');
+});
+
+test('createReportSummary emits sagittal cadence/speed comment rules when thresholds are breached', () => {
   const summary = createReportSummary({
     analysisData: [
       { elapsedMs: 0, speed: 0.5, cadence: 80, symmetry: 90, trunk: 5, pelvis: 5,
@@ -173,11 +222,11 @@ test('createReportSummary does not emit sagittal speed/cadence comment rules (re
     sessionTimestamp: Date.UTC(2026, 2, 23)
   });
 
-  // 矢状面では歩行速度・ケイデンスのコメントは出力しない
-  assert.ok(!summary.comments.some((c) => c.includes('歩行速度') && c.includes('遅い')),
-    'sagittal should NOT emit slow speed comment');
-  assert.ok(!summary.comments.some((c) => c.includes('ケイデンス') && c.includes('低め')),
-    'sagittal should NOT emit low cadence comment');
+  // 矢状面でも低ケイデンス・低速度のときはコメントを出す（参考値として）
+  assert.ok(summary.comments.some((c) => c.includes('ケイデンス') && c.includes('低め')),
+    'sagittal should emit cadence low comment when cadence < 100');
+  assert.ok(summary.comments.some((c) => c.includes('歩行速度') && c.includes('参考値')),
+    'sagittal should emit speed slow comment with reference note when speed < 0.8');
 });
 
 test('createReportSummary includes ankle thresholds in sagittal summary', () => {

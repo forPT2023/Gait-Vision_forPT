@@ -19,6 +19,18 @@ test('createInitialAnalysisState returns a clean analysis session state', () => 
     stepCount: 0,
     analysisFrameCount: 0,
     lastHeelStrikeTime: 0,
+    lastLeftHeelStrikeTime: 0,
+    lastRightHeelStrikeTime: 0,
+    leftHeelState: 'stable',
+    rightHeelState: 'stable',
+    emaLeftHeelY: null,
+    emaRightHeelY: null,
+    leftSwingPeak: null,
+    rightSwingPeak: null,
+    leftEventCount: 0,
+    rightEventCount: 0,
+    leftHadDownPhase: false,
+    rightHadDownPhase: false,
     emaValues: { trunk: 0, pelvis: 0 }
   });
 });

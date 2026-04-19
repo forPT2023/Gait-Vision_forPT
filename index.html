@@ -26,6 +26,9 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: var(--app-height, 100dvh); overflow: hidden; background-color: #0a0e1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #e2e8f0; overscroll-behavior: none; }
+    /* phone mode: html要素のoverflowもautoに上書きしないとbodyスクロールが効かない */
+    /* JS側でdocumentElementにdata-device-modeを付与するため:has()不要 */
+    html[data-device-mode="phone"] { overflow-y: auto; height: auto; }
     #main-app { display: flex; flex-direction: column; height: var(--app-height, 100dvh); overflow: hidden; }
     #main-app.hidden { display: none; }
     header { flex-shrink: 0; background: linear-gradient(135deg, #1a1f2e 0%, #252d3d 100%); padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 1rem 0.75rem 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.5); border-bottom: 1px solid #2d3748; }
@@ -138,8 +141,8 @@
       body[data-device-mode="phone"] #control-bar { display: none !important; }
       body[data-device-mode="phone"] #main-layout { overflow-y: visible; }
     }
-    body[data-device-mode="phone"] { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
-    body[data-device-mode="phone"] #main-app { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+    body[data-device-mode="phone"] { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; min-height: 100dvh; height: auto; }
+    body[data-device-mode="phone"] #main-app { overflow-y: visible; overflow-x: hidden; height: auto; min-height: 100dvh; }
     body[data-device-mode="phone"] #main-layout { overflow-y: visible; height: auto; }
     body[data-device-mode="phone"] #canvas-container { min-height: 260px; flex: 0 0 auto; }
     body[data-device-mode="phone"] #charts-container { overflow: visible; display: block; }
@@ -245,6 +248,68 @@
     .tooltip .tooltiptext { visibility: hidden; width: 200px; background-color: #1a1f2e; color: #e2e8f0; text-align: center; border-radius: 6px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -100px; opacity: 0; transition: opacity 0.3s; font-size: 0.75rem; line-height: 1.3; border: 1px solid #2d3748; }
     .tooltip .tooltiptext::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px; border-width: 5px; border-style: solid; border-color: #1a1f2e transparent transparent transparent; }
     .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+
+    /* ── Guide Modal ─────────────────────────────────────────────────────── */
+    #guide-modal { position: fixed; top: 0; left: 0; width: 100%; height: var(--app-height, 100dvh); background: rgba(0,0,0,0.92); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 1rem; }
+    #guide-modal.show { display: flex; }
+    #guide-modal-content { background: #0f1929; border-radius: 1rem; max-width: 860px; width: 100%; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #1e3a5a; box-shadow: 0 20px 60px rgba(0,0,0,0.8); }
+    #guide-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; background: #0a1628; border-bottom: 1px solid #1e3a5a; flex-shrink: 0; }
+    #guide-modal-header h2 { color: #60a5fa; font-size: 1.15rem; font-weight: 700; margin: 0; }
+    #guide-modal-header button { background: #1e293b; border: 1px solid #334155; color: #94a3b8; border-radius: 0.5rem; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.875rem; transition: background 0.15s; }
+    #guide-modal-header button:hover { background: #334155; color: #e2e8f0; }
+    #guide-modal-body { overflow-y: auto; flex: 1; min-height: 0; }
+    /* Tab nav */
+    .gv-guide-container { display: flex; height: 100%; min-height: 0; }
+    .gv-tab-nav { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem; background: #0a1628; min-width: 150px; max-width: 190px; flex-shrink: 0; border-right: 1px solid #1e3a5a; overflow-y: auto; }
+    .gv-tab-btn { background: transparent; border: none; color: #94a3b8; text-align: left; padding: 0.55rem 0.75rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.8rem; line-height: 1.3; transition: all 0.15s; white-space: normal; }
+    .gv-tab-btn:hover { background: #1e293b; color: #cbd5e1; }
+    .gv-tab-btn.active { background: #1e3a5a; color: #60a5fa; font-weight: 600; }
+    /* Tab panels */
+    .gv-tab-content { flex: 1; overflow-y: auto; padding: 1rem 1.25rem; min-width: 0; }
+    .gv-tab-panel { display: none; }
+    .gv-tab-panel.active { display: block; }
+    .gv-panel-title { color: #60a5fa; font-size: 1.05rem; font-weight: 700; margin: 0 0 0.75rem 0; padding-bottom: 0.5rem; border-bottom: 2px solid #1e3a5a; }
+    /* Metric blocks */
+    .gv-guide-metric-block { background: #0d1f35; border: 1px solid #1e3a5a; border-radius: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 0.85rem; }
+    .gv-guide-metric-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
+    .gv-guide-badge { display: inline-block; padding: 0.25rem 0.6rem; border-radius: 2rem; font-size: 0.82rem; font-weight: 600; }
+    .gv-badge-blue   { background: #1e3a5a; color: #60a5fa; }
+    .gv-badge-green  { background: #0d2e1f; color: #34d399; }
+    .gv-badge-purple { background: #1e1b4b; color: #a78bfa; }
+    .gv-badge-orange { background: #2d1a0a; color: #fb923c; }
+    .gv-badge-red    { background: #2d0a0a; color: #f87171; }
+    .gv-guide-range { font-size: 0.78rem; color: #64748b; background: #0a1628; padding: 0.2rem 0.5rem; border-radius: 0.3rem; border: 1px solid #1e293b; }
+    /* Tables */
+    .gv-guide-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; color: #cbd5e1; }
+    .gv-guide-table th { background: #0a1628; color: #94a3b8; padding: 0.35rem 0.6rem; text-align: left; border: 1px solid #1e3a5a; white-space: nowrap; width: 30%; font-weight: 600; vertical-align: top; }
+    .gv-guide-table td { padding: 0.35rem 0.6rem; border: 1px solid #1e293b; vertical-align: top; line-height: 1.45; }
+    .gv-guide-reliability-table th { background: #111827; }
+    .gv-guide-reliability-table thead th { width: auto; color: #60a5fa; }
+    .gv-rank-high { color: #34d399; font-weight: 700; }
+    .gv-rank-mid  { color: #fbbf24; font-weight: 700; }
+    .gv-rank-low  { color: #fb923c; font-weight: 700; }
+    /* Tips & Callouts */
+    .gv-guide-tip { background: #0d2a1a; border-left: 4px solid #34d399; border-radius: 0 0.5rem 0.5rem 0; padding: 0.65rem 0.85rem; margin: 0.75rem 0; font-size: 0.82rem; color: #a7f3d0; line-height: 1.55; }
+    .gv-guide-callout { background: #0d1e35; border: 1px dashed #2563eb; border-radius: 0.5rem; padding: 0.65rem 0.85rem; margin-bottom: 0.85rem; font-size: 0.82rem; color: #93c5fd; line-height: 1.55; }
+    /* Shooting guide */
+    .gv-guide-shooting-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .gv-guide-shooting-item { background: #0d1f35; border: 1px solid #1e3a5a; border-radius: 0.75rem; padding: 0.75rem; }
+    .gv-guide-shooting-icon { font-size: 2rem; text-align: center; margin-bottom: 0.4rem; }
+    .gv-guide-shooting-title { color: #60a5fa; font-size: 0.88rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .gv-guide-shooting-item ul, .gv-guide-shooting-common ul { color: #cbd5e1; font-size: 0.79rem; padding-left: 1.1rem; line-height: 1.6; margin: 0; }
+    .gv-guide-shooting-common { background: #0a1628; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.65rem 0.85rem; }
+    .gv-guide-shooting-common .gv-guide-shooting-title { color: #fbbf24; margin-bottom: 0.4rem; }
+    /* p & strong in panels */
+    .gv-tab-panel p { color: #94a3b8; font-size: 0.82rem; line-height: 1.6; margin: 0 0 0.5rem 0; }
+    .gv-tab-panel strong { color: #e2e8f0; }
+    .gv-tab-panel em { color: #93c5fd; }
+    /* Responsive for small screens */
+    @media (max-width: 600px) {
+      .gv-guide-container { flex-direction: column; }
+      .gv-tab-nav { flex-direction: row; overflow-x: auto; max-width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid #1e3a5a; padding: 0.5rem; }
+      .gv-tab-btn { white-space: nowrap; flex-shrink: 0; }
+      .gv-guide-shooting-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -301,6 +366,20 @@
       </div>
     </header>
 
+    <!-- ========== DEBUG LOG PANEL (iPhone Safari 診断用) ========== -->
+    <div id="dbg-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:rgba(0,0,0,0.92);color:#0f0;font-family:monospace;font-size:11px;max-height:55vh;overflow-y:auto;padding:6px 8px;border-top:2px solid #0f0;" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:4px;">
+        <span style="color:#ff0;font-weight:bold;">📋 DEBUG LOG (sessionStorage永続)</span>
+        <div style="display:flex;gap:4px;">
+          <button id="dbg-clear-btn" style="background:#600;color:#fff;border:none;border-radius:3px;padding:2px 6px;font-size:11px;">🗑クリア</button>
+          <button onclick="document.getElementById('dbg-panel').style.display='none'" style="background:#333;color:#fff;border:none;border-radius:3px;padding:2px 6px;font-size:11px;">✕ 閉じる</button>
+        </div>
+      </div>
+      <div id="dbg-log-list" style="word-break:break-all;"></div>
+    </div>
+    <button id="dbg-toggle-btn" style="display:none;position:fixed;bottom:8px;right:8px;z-index:10000;background:#1a3a1a;color:#0f0;border:2px solid #0f0;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:bold;box-shadow:0 2px 8px rgba(0,255,0,0.3);" onclick="var p=document.getElementById('dbg-panel');if(p.style.display==='none'){window._dbgRenderPanel();p.style.display='block';}else{p.style.display='none';}">🐛LOG</button>
+    <!-- ========== END DEBUG LOG PANEL ========== -->
+
     <div id="phone-flow-banner" class="hidden-panel" data-view="capture">
       <div>
         <div id="phone-flow-message">ステップ1: スマホで動画を撮影またはアップロードしてください。</div>
@@ -333,6 +412,7 @@
           <button id="btn-phone-stage-csv" class="muted-action">📊 CSVを出力</button>
           <button id="btn-phone-stage-settings" class="warn-action">🗑️ データ管理</button>
           <button id="btn-phone-stage-back" class="warn-action">↩️ ① 取得に戻る</button>
+          <button id="btn-phone-stage-guide" class="muted-action">📖 指標ガイド</button>
         </div>
       </div>
     </div>
@@ -348,7 +428,7 @@
       <div class="phone-preview-card phone-results-only">
         <h3>✨ 解析プレビュー（マーカー重畳）</h3>
         <p>解析終了後に自動生成されるプレビュー動画です。スクロールしながら結果を確認できます。</p>
-        <video id="phone-analyzed-preview" playsinline webkit-playsinline preload="metadata"></video>
+        <video id="phone-analyzed-preview" controls playsinline webkit-playsinline preload="metadata" x-webkit-airplay="allow"></video>
         <span id="phone-analyzed-preview-empty" class="phone-preview-empty">解析後のプレビュー動画はまだありません。解析を開始してください。</span>
       </div>
     </div>
@@ -421,6 +501,10 @@
         <button id="btn-install-app" class="btn-secondary" style="display:none;">📲 インストール</button>
         <span class="tooltiptext">ホーム画面追加 / アプリとしてインストール</span>
       </div>
+      <div class="tooltip">
+        <button id="btn-guide" class="btn-secondary">📖 指標ガイド</button>
+        <span class="tooltiptext">各指標の意味・活用法・注意事項を解説</span>
+      </div>
     </div>
   </div>
 
@@ -441,6 +525,17 @@
         <button class="btn-print" id="btn-report-pdf">💾 PDF保存</button>
         <button class="btn-close" id="btn-report-close">✕ 閉じる</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ======== Guide Modal ======== -->
+  <div id="guide-modal">
+    <div id="guide-modal-content">
+      <div id="guide-modal-header">
+        <h2>📖 指標ガイド — Gait VISION forPT</h2>
+        <button id="btn-guide-close">✕ 閉じる</button>
+      </div>
+      <div id="guide-modal-body"></div>
     </div>
   </div>
 
@@ -484,7 +579,7 @@
     import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
     import { LM, createInitialEmaValues } from './src/analysis/constants.js';
     import { buildAnalysisDataPoint, calculateCadenceFromEvents } from './src/analysis/session.js';
-    import { calcJointAngles, calcPelvicTilt, calcStepSymmetry, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema } from './src/analysis/metrics.js';
+    import { calcJointAngles, calcPelvicTilt, calcStepSymmetry, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema, KneePeakTracker } from './src/analysis/metrics.js';
     import { buildStoredPatientIdState, hasStoredConsent, persistConsent, persistPatientId } from './src/app/bootstrap.js';
     import { buildSessionRecord } from './src/app/session.js';
     import { createInitialAnalysisState, createStartedAnalysisState } from './src/app/state.js';
@@ -499,22 +594,117 @@
     import { updateOrientationWarning } from './src/ui/orientation.js';
     import { validatePatientId } from './src/ui/patient.js';
     import { closeReportModal, openReportModal, setReportHtml } from './src/ui/reportModal.js';
+    import { closeGuideModal, openGuideModal } from './src/ui/guideModal.js';
     import { restoreScreenState, showMainApp, showPatientScreen } from './src/ui/screens.js';
     import { applyViewportHeightVar } from './src/ui/viewport.js';
     import { setupInstallPrompt } from './src/pwa/install.js';
     import { registerAppServiceWorker } from './src/pwa/serviceWorker.js';
     import { createSessionStorage } from './src/storage/db.js';
-    import { buildAnalysisCsv, buildCsvExportFilename, buildPdfReportFilename, downloadBlobFile } from './src/storage/export.js';
+    import { buildAnalysisCsv, buildCsvExportFilename, buildPdfReportFilename, downloadBlobFile, shareOrDownloadBlob } from './src/storage/export.js';
     import { buildCameraConstraints, listAvailableVideoInputs, releaseCameraResources, shouldRestartCameraForOrientationChange, startCameraStreamWithFallbacks, stopMediaStream, waitForVideoMetadataAndPlay } from './src/video/camera.js';
     import { calcVideoDrawRect, calculateCanvasLayout, getDefaultVideoAspectRatio, resolveDisplaySourceDimensions, syncCanvasDisplaySize } from './src/video/display.js';
     import { buildAnalyzedVideoFilename, buildRecordingFilename, buildRecordingMetadata, closeSaveRecordingDialog, createCanvasRecordingSession, downloadBlob, formatRecordingInfoText, resetRecordedVideoState, showSaveRecordingDialog as showRecordingSaveDialog } from './src/video/recording.js';
-    import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findInterpolatedAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareAnalysisFrame, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork } from './src/video/runtime.js';
+    import { cancelScheduledHandle, cancelScheduledMediaWork, clearLoadedVideoState as clearVideoRuntimeState, findInterpolatedAnalysisPoint, getMediaPipeTimestamp, getPostAnalysisStopPlan, getSourceMode, prepareForVideoLoad, scheduleAnalysisFrame, scheduleMediaWork, shouldSkipPreDraw, shouldSkipPostDraw } from './src/video/runtime.js';
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
-    console.log(`${APP_VERSION_LABEL} - Initializing...`);
+    // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
+    console.log('[Gait-Vision] v3.10.49-gait-v49 loaded — fix: レポートグラフ表示修正・プレビューちらつき抑制・エクスポートマーカー座標改善');
 
+    // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
+    // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
+    const _dbgMaxLines = 400;
+    const _DBG_SS_KEY = 'gait_dbg_log';
+    // sessionStorage から復元（ページリロードをまたがない、タブ内は保持）
+    let _dbgLines = (() => {
+      try { return JSON.parse(sessionStorage.getItem(_DBG_SS_KEY) || '[]'); } catch(_) { return []; }
+    })();
+    function _dbgSaveToStorage() {
+      try { sessionStorage.setItem(_DBG_SS_KEY, JSON.stringify(_dbgLines.slice(-_dbgMaxLines))); } catch(_) {}
+    }
+    // パネルの DOM を_dbgLines から再構築する（パネルを開いたときに呼ぶ）
+    window._dbgRenderPanel = function() {
+      const el = document.getElementById('dbg-log-list');
+      if (!el) return;
+      el.innerHTML = '';
+      for (const line of _dbgLines) {
+        const div = document.createElement('div');
+        // capture への遷移行を赤くハイライト
+        const isCapture = line.includes('phoneFlowView: results') && line.includes('→ capture')
+          || line.includes('phoneFlowView=capture') && (line.includes('[prepareForNewCapture]') || line.includes('[clearLoadedVideoState]') || line.includes('[syncUI]'));
+        div.style.cssText = 'border-bottom:1px solid #1a3a1a;padding:1px 0;' + (isCapture ? 'color:#ff4444;font-weight:bold;' : '');
+        div.textContent = line;
+        el.appendChild(div);
+      }
+      const panel = document.getElementById('dbg-panel');
+      if (panel) panel.scrollTop = panel.scrollHeight;
+    };
+    // クリアボタンの処理
+    document.addEventListener('DOMContentLoaded', () => {
+      const clearBtn = document.getElementById('dbg-clear-btn');
+      if (clearBtn) {
+        clearBtn.onclick = () => {
+          _dbgLines = [];
+          _dbgSaveToStorage();
+          const el = document.getElementById('dbg-log-list');
+          if (el) el.innerHTML = '';
+        };
+      }
+    });
+    function dbgLog(...args) {
+      const msg = args.map(a => {
+        if (a === null) return 'null';
+        if (a === undefined) return 'undefined';
+        if (typeof a === 'object') { try { return JSON.stringify(a); } catch(_){return String(a);} }
+        return String(a);
+      }).join(' ');
+      const ts = new Date().toISOString().slice(11,23);
+      const line = ts + ' ' + msg;
+      console.log('[DBG]', msg);
+      _dbgLines.push(line);
+      if (_dbgLines.length > _dbgMaxLines) _dbgLines.shift();
+      // sessionStorage に保存（画面リセット後も読み出せる）
+      _dbgSaveToStorage();
+      // パネルが開いている場合のみ DOM に追記
+      const panel = document.getElementById('dbg-panel');
+      if (panel && panel.style.display !== 'none') {
+        const el = document.getElementById('dbg-log-list');
+        if (el) {
+          const div = document.createElement('div');
+          const isCapture = msg.includes('phoneFlowView: results') && msg.includes('→ capture')
+            || msg.includes('phoneFlowView=capture') && (msg.includes('[prepareForNewCapture]') || msg.includes('[clearLoadedVideoState]') || msg.includes('[syncUI]'));
+          div.style.cssText = 'border-bottom:1px solid #1a3a1a;padding:1px 0;' + (isCapture ? 'color:#ff4444;font-weight:bold;' : '');
+          div.textContent = line;
+          el.appendChild(div);
+          if (el.children.length > _dbgMaxLines) el.removeChild(el.firstChild);
+          panel.scrollTop = panel.scrollHeight;
+        }
+      }
+    }
+    // スマホ判定後に表示ON (deviceMode設定後に呼ぶ)
+    function enableDebugPanel() {
+      const btn = document.getElementById('dbg-toggle-btn');
+      if (btn) btn.style.display = 'block';
+    }
+    // ─────────────────────────────────────────────────────────────────────────────
 
-    // Global state
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SW unregistered → auto-reload once to get clean network-fetched page
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (evt) => {
+        if (evt.data?.type === 'SW_UNREGISTERED') {
+          console.log('[SW] SW unregistered, reloading for clean state...');
+          window.location.reload();
+        }
+      });
+    }
+    // iOS Safari 判定: Web Share API でファイル共有できる場合は true
+    // iOS Safari 15+ は navigator.canShare({files}) = true
+    const _isIOSShareAvailable = (() => {
+      const ua = navigator.userAgent;
+      const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      return isIOS && typeof navigator.share === 'function' && typeof navigator.canShare === 'function';
+    })();
+
     let poseLandmarker = null;
     let currentPlane = 'frontal';
     let analysisPlane = 'frontal';
@@ -523,8 +713,10 @@
     let isRecording = false;
     let isHandlingRecordAction = false;
     let lastRecordActionAt = 0;
-    let isSavingAnalyzedVideo = false;
     let isLoadingVideo = false; // Prevent concurrent video loads
+    // プレビューループが detectForVideo を await 中は true。
+    // startAnalysis() がこのフラグを確認し、並行 detectForVideo を防ぐ。
+    let isPreviewDetecting = false;
     let mediaStream = null;
     let mediaRecorder = null;
     let recordedChunks = [];
@@ -534,52 +726,70 @@
     let patientId = '';
     let analysisStartEpochMs = null;
     let analysisStartMpTimestamp = null;
-    let analysisVideoStartMs = 0; // videoElement.currentTime (ms) at the first analysed frame.
-                                  // Used to align export elapsedMs with analysisData.elapsedMs.
-    // videoWidth / videoHeight reported by videoElement at the time analysis ran.
-    // Stored so the export pipeline can draw landmarks using the SAME reference
-    // dimensions the pose landmarker used for normalisation, even if exportVideoElement
-    // reports different dimensions (e.g. off-DOM element, different decoder path).
+    let analysisVideoStartMs = 0;
     let analysisVideoWidth = 0;
     let analysisVideoHeight = 0;
+    let analysisCanvasWidth = 0;  // 解析時のキャンバスサイズ（ランドマーク座標変換に使用）
+    let analysisCanvasHeight = 0;
     let fpsCounter = 0;
     let fpsStartTime = performance.now();
     let analysisData = [];
     let prevLandmarks = null;
-    let prevWorldLandmarks = null; // For 3D speed calculation
+    let prevWorldLandmarks = null;
     let prevTimestamp = null;
     let gaitEvents = [];
     let stepCount = 0;
     let analysisFrameCount = 0;
     let lastHeelStrikeTime = 0;
+    let lastLeftHeelStrikeTime = 0;
+    let lastRightHeelStrikeTime = 0;
+    let leftHeelState = 'stable';
+    let rightHeelState = 'stable';
+    let emaLeftHeelY  = null;
+    let emaRightHeelY = null;
+    let leftSwingPeak  = null;
+    let rightSwingPeak = null;
+    let leftEventCount  = 0;
+    let rightEventCount = 0;
+    let leftHadDownPhase  = false;
+    let rightHadDownPhase = false;
     let emaValues = createInitialEmaValues();
+    let kneePeakTracker = new KneePeakTracker();
 
-    // Phase 3: Video file and recording
     let videoFileUrl = null;
+    // iOS Safari では fetch(objectURL) が制限されるため、
+    // ファイル選択時のオリジナル Blob を保持しておき、
+    // renderAnalyzedVideoBlob で直接 ObjectURL を生成する。
+    let videoFileBlob = null;
     let originalPreviewUrl = null;
     let analyzedPreviewUrl = null;
     let analyzedPreviewBlob = null;
     let analyzedPreviewMimeType = '';
     let isGeneratingAnalyzedPreview = false;
+    // WebCodecs コーデック選択結果キャッシュ（同一セッション内で再利用）
+    // { type, configKey } の形式。encW/encH/bitrate/fpsが変わった場合は無効化。
+    let _wcCodecCache = null;
     const RECORD_ACTION_COOLDOWN_MS = 800;
-    let videoEpochBaseMs = null; // For Chart.js realtime x-axis in video mode
-    let videoFrameCallbackHandle = null; // requestVideoFrameCallback handle (video mode)
-    let mpTimestampOffset = 0; // Offset added to video currentTime*1000 so MediaPipe always receives a monotonically increasing timestamp across multiple analysis runs on the same video file.
-    let lastAnalysisMpTimestamp = 0; // The last MediaPipe timestamp successfully passed to detectForVideo; used to compute mpTimestampOffset on the next run.
+    let videoEpochBaseMs = null;
+    let videoFrameCallbackHandle = null;
+    let mpTimestampOffset = 0;
+    let lastAnalysisMpTimestamp = 0;
+    // Tracks the highest timestamp ever passed to poseLandmarker.detectForVideo()
+    // across both the preview loop and the analysis loop.  Used to ensure the
+    // next analysis run starts with a strictly-greater timestamp so MediaPipe
+    // never sees a non-monotonic sequence (which would cause it to silently
+    // skip detection and leave the canvas without landmarks for ~1 second).
+    let lastDetectForVideoTimestamp = 0;
     let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     let deviceMode = 'desktop';
     let chartsVisibleOnPhone = false;
     let phoneFlowView = 'capture';
-    let recordingInterval = null; // Timer for recording info display
+    let recordingInterval = null;
     let orientationRestartTimeoutId = null;
 
-    // DOM Elements
     const videoElement = document.getElementById('video-element');
     const canvasElement = document.getElementById('canvas-element');
     const canvasCtx = canvasElement.getContext('2d');
-    // DrawingUtils (WebGL ベース) は使用しない。
-    // 骨格線・関節円はすべてネイティブ Canvas2D API で描画することで、
-    // 毎フレームの WebGL コンテキスト生成コストを排除しかくつきを防ぐ。
     const fpsDisplay = document.getElementById('fps-display');
     const installButton = document.getElementById('btn-install-app');
     const cameraSelect = document.getElementById('camera-select');
@@ -611,6 +821,18 @@
       stepCount,
       analysisFrameCount,
       lastHeelStrikeTime,
+      lastLeftHeelStrikeTime,
+      lastRightHeelStrikeTime,
+      leftHeelState,
+      rightHeelState,
+      emaLeftHeelY,
+      emaRightHeelY,
+      leftSwingPeak,
+      rightSwingPeak,
+      leftEventCount,
+      rightEventCount,
+      leftHadDownPhase,
+      rightHadDownPhase,
       emaValues
     } = createInitialAnalysisState({ createInitialEmaValues }));
 
@@ -629,9 +851,9 @@
       logger: console
     });
 
-    // ========== Helper Functions ==========
-
     function clearLoadedVideoState() {
+      const _clvStack = new Error().stack.split('\n').slice(1,6).join(' | ');
+      dbgLog('[clearLoadedVideoState] CALLED! videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' phoneFlowView=' + phoneFlowView + ' | stack: ' + _clvStack);
       const nextState = clearVideoRuntimeState({
         videoElement,
         videoFrameCallbackHandle,
@@ -642,13 +864,18 @@
       videoFrameCallbackHandle = nextState.videoFrameCallbackHandle;
       videoFileUrl = nextState.videoFileUrl;
       videoEpochBaseMs = nextState.videoEpochBaseMs;
+      // オリジナル Blob への参照もクリア（メモリリーク防止）
+      videoFileBlob = null;
       // Reset MediaPipe timestamp offset when the video file is unloaded so the
       // next video starts from timestamp 0 without a stale offset.
       mpTimestampOffset = 0;
       lastAnalysisMpTimestamp = 0;
+      lastDetectForVideoTimestamp = 0;
       analysisVideoStartMs = 0;
       analysisVideoWidth = 0;
       analysisVideoHeight = 0;
+      analysisCanvasWidth = 0;
+      analysisCanvasHeight = 0;
     }
 
     function revokePreviewUrl(url) {
@@ -743,8 +970,10 @@
       canvasCtx.drawImage(sourceVideoElement, rect.x, rect.y, rect.w, rect.h);
 
       if (dataPoint?.landmarks?.length) {
+        // analysisData のランドマークはキャンバス全体で正規化されているため
+        // videoW/H を渡すと黒帯オフセット二重適用になる。videoW=0/videoH=0 で正しく描画。
         drawEnhancedLandmarks(dataPoint.landmarks, dataPoint.worldLandmarks || null, false,
-          canvasCtx, cW, cH, vW, vH);
+          canvasCtx, cW, cH, 0, 0);
       }
     }
 
@@ -783,18 +1012,29 @@
     }
 
     function estimateExportFrameRate(sourceVideoElement) {
+      // 動画ファイルのエクスポートfps推定。
+      // captureStream(fps) に渡す値はあくまで「上限ヒント」であり、
+      // 実際の録画フレームは canvas が更新されたタイミングで発生する。
+      // 高すぎる値（例: 60fps）は不要なフレームを連続送信させてしまい、
+      // 動画のカクツキや重複フレームの原因になる。
+      // 低すぎる値（例: 10fps）は録画が間引かれてカクツキになる。
+      // → 30fps を基準に、解析中の実測フレームレートで補正する。
       const analysisFps = estimateAnalysisFrameRate();
       const sourceDurationSec = Number.isFinite(sourceVideoElement?.duration) ? sourceVideoElement.duration : null;
-      const sampledFps = (sourceDurationSec && analysisData.length >= 2)
+      // analysisData の密度（フレーム数 / 動画秒数）はスキップフレームが多いと低くなるため
+      // 補正値として使わず参考程度にする。
+      const sampledFps = (sourceDurationSec && sourceDurationSec > 0 && analysisData.length >= 2)
         ? (analysisData.length / sourceDurationSec)
         : null;
-      const candidates = [analysisFps, sampledFps].filter((value) => Number.isFinite(value) && value > 0);
-      if (!candidates.length) {
-        return 30;
+      // analysisFps を優先し、sampledFps は analysisFps がない場合のみ使用する。
+      const primaryFps = analysisFps ?? sampledFps;
+      if (!Number.isFinite(primaryFps) || primaryFps <= 0) {
+        return 30; // デフォルト
       }
-
-      const avg = candidates.reduce((sum, value) => sum + value, 0) / candidates.length;
-      return Math.round(Math.min(60, Math.max(24, avg)));
+      // 24〜30fps にクランプ: 高すぎると重複フレーム問題を起こし、低すぎるとカクツキになる。
+      // 解析fpsが30を超えていても captureStream に30を渡すことでMediaRecorderへの
+      // フレーム送信頻度を抑制し、滑らかな出力を保証する。
+      return Math.round(Math.min(30, Math.max(24, primaryFps)));
     }
 
     function estimateExportVideoBitrate({ width, height, fps }) {
@@ -887,7 +1127,6 @@
       }
     }
 
-    // Utility functions
     function showNotification(message, type) {
       return renderNotification({
         documentRef: document,
@@ -935,6 +1174,8 @@
     }
 
     function prepareForNewCaptureSession({ resetCharts = false } = {}) {
+      const _stack = new Error().stack.split('\n').slice(1,6).join(' | ');
+      dbgLog('[prepareForNewCapture] called! phoneFlowView: ' + phoneFlowView + ' → capture | stack: ' + _stack);
       phoneFlowView = 'capture';
       resetAnalysisOutputButtons();
       if (resetCharts) {
@@ -946,7 +1187,7 @@
 
     function syncPhoneQuickActions() {
       const state = getPhoneQuickActionDisabledState({
-        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled || isSavingAnalyzedVideo,
+        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled,
         reportDisabled: document.getElementById('btn-report').disabled,
         csvDisabled: document.getElementById('btn-csv').disabled
       });
@@ -956,12 +1197,18 @@
         state
       });
 
+      // iOS Safari では共有シートが開くため、クイックアクションボタンのラベルを更新
+      const _qaBtn = document.getElementById('btn-phone-analyzed-video');
+      if (_qaBtn && _isIOSShareAvailable) {
+        _qaBtn.textContent = '📤 解析動画';
+      }
+
       syncPhoneStageActions(state);
     }
 
     function syncPhoneStageActions(quickActionState = null) {
       const state = quickActionState || getPhoneQuickActionDisabledState({
-        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled || isSavingAnalyzedVideo,
+        analyzedVideoDisabled: document.getElementById('btn-save-analyzed-video').disabled,
         reportDisabled: document.getElementById('btn-report').disabled,
         csvDisabled: document.getElementById('btn-csv').disabled
       });
@@ -989,7 +1236,14 @@
           ? '⏳ 解析プレビュー生成中'
           : (canStop ? '⏹ 解析停止' : '▶️ 解析開始');
       }
-      if (saveButton) saveButton.disabled = state.analyzedVideoDisabled || isGeneratingAnalyzedPreview || isSavingAnalyzedVideo;
+      if (saveButton) {
+        saveButton.disabled = state.analyzedVideoDisabled || isGeneratingAnalyzedPreview;
+        // iOS Safari では共有シートが開くため、ラベルをiOS向けに変える
+        if (!saveButton.dataset.labelUpdated) {
+          saveButton.textContent = _isIOSShareAvailable ? '📤 解析動画を共有' : '🎥 解析動画を保存';
+          saveButton.dataset.labelUpdated = '1';
+        }
+      }
       if (reportButton) reportButton.disabled = state.reportDisabled;
       if (csvButton) csvButton.disabled = state.csvDisabled;
     }
@@ -1009,8 +1263,17 @@
         hasAnalysisData: analysisData.length > 0,
         isAnalyzing,
         analysisPoints: analysisData.length,
-        stepCount
+        stepCount,
+        hasVideoFile: !!videoFileUrl
       });
+      // syncUI は解析中に 18ms 間隔で呼ばれるため、isAnalyzing=true 中はログを省略する
+      // 状態遷移（phoneFlowView/isAnalyzing/hasVideoFile の変化）のみ記録する
+      const _syncUiStateKey = deviceMode+'|'+phoneFlowView+'|'+isAnalyzing+'|'+!!videoFileUrl;
+      if (typeof window._lastSyncUiStateKey === 'undefined' || window._lastSyncUiStateKey !== _syncUiStateKey) {
+        window._lastSyncUiStateKey = _syncUiStateKey;
+        dbgLog('[syncUI] mode=' + deviceMode + ' phoneFlowView=' + phoneFlowView + ' view=' + phoneFlowState.view + ' analysisData=' + analysisData.length + ' isAnalyzing=' + isAnalyzing + ' hasVideoFile=' + !!videoFileUrl);
+      }
+      if (deviceMode === 'phone') enableDebugPanel();
       chartsVisibleOnPhone = phoneFlowState.chartsVisible;
       applyPhoneFlowUi({
         documentRef: document,
@@ -1043,7 +1306,6 @@
       // 解析ループは analysisCanvasW/H に固定されているため、
       // resize してもランドマーク座標がずれるだけで意味がない。
       if (isAnalyzing) {
-        console.log('[Canvas] Resize skipped: analysis in progress');
         return;
       }
       const container = document.getElementById('canvas-container');
@@ -1054,7 +1316,6 @@
       // 0サイズで計算すると 1×1 px になり、解析開始時に極小キャンバスになるため
       // コンテナが非表示のときはリサイズをスキップする。
       if (containerW === 0 || containerH === 0) {
-        console.log('[Canvas] Resize skipped: container not visible (', containerW, 'x', containerH, ')');
         return;
       }
 
@@ -1085,10 +1346,6 @@
         pixelWidth: layout.pixelWidth,
         pixelHeight: layout.pixelHeight
       });
-
-      console.log('[Canvas] Resized to', `${layout.cssWidth}x${layout.cssHeight}`, 'css px /',
-                  `${layout.pixelWidth}x${layout.pixelHeight}`, 'backing px',
-                  '(video:', videoElement.videoWidth, 'x', videoElement.videoHeight, '| display:', displaySource.width, 'x', displaySource.height, '| swapped:', displaySource.wasSwapped, ')');
     }
 
     async function refreshCameraOptions({ preserveSelection = true } = {}) {
@@ -1131,16 +1388,6 @@
       cameraSelect.value = selectedValue || 'environment';
     }
 
-    // Gait analysis helpers moved to src/analysis/*.js
-
-    // ctx / canvasW / canvasH を省略するとメイン canvas を使う（通常の解析描画）。
-    // エクスポート時はオフスクリーン canvas の値を渡すことで画面を汚さない。
-    //
-    // ── マーカー座標の方針 ───────────────────────────────────────────────────
-    // videoW / videoH を渡すと calcVideoDrawRect で object-fit:contain 相当の
-    // 描画矩形を計算し、drawImage と landmark 座標を完全に一致させる。
-    // これにより canvas と動画の AR が異なる場合でも正確に重なる。
-    // videoW / videoH を省略（または 0）すると canvas 全体をフォールバックとして使う。
     function drawEnhancedLandmarks(landmarks, worldLandmarks, showLabels = false,
                                    ctx = canvasCtx, canvasW = canvasElement.width, canvasH = canvasElement.height,
                                    videoW = 0, videoH = 0) {
@@ -1155,6 +1402,17 @@
       const offsetY = rect.y;
       const scaleX  = rect.w;
       const scaleY  = rect.h;
+
+      // ── 描画スケール計算 ──────────────────────────────────────────────────
+      // マーカーサイズ・線幅を「映像の実描画幅」に比例させる。
+      // 基準: 描画幅 500px のとき lineWidth=2、dotRadius=7（元の固定値相当）。
+      // プレビュー(~500px幅)とエクスポート(元動画幅=1280〜1920px)で
+      // マーカーの「見た目の大きさ」が揃う。
+      // clamp: lineWidth 最小1px・最大8px、dotRadius 最小3px・最大20px。
+      const drawScale = scaleX / 500;
+      const scaledLineWidth = Math.max(1, Math.min(8,  2   * drawScale));
+      const scaledDotRadius = Math.max(3, Math.min(20, 7   * drawScale));
+      const scaledDotStroke = Math.max(1, Math.min(4,  1.5 * drawScale));
 
       // ── 全身骨格接続線（MediaPipe POSE_CONNECTIONS 相当・35本） ────────────
       // Canvas2D の lineTo で直接描画（DrawingUtils/WebGL より軽量）。
@@ -1172,7 +1430,7 @@
       ];
       ctx.save();
       ctx.strokeStyle = '#00ffff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = scaledLineWidth;
       ctx.lineCap = 'round';
       ALL_CONNECTIONS.forEach(([a, b]) => {
         const lmA = landmarks[a];
@@ -1207,11 +1465,11 @@
           const x = offsetX + lm.x * scaleX;
           const y = offsetY + lm.y * scaleY;
           ctx.beginPath();
-          ctx.arc(x, y, 7, 0, 2 * Math.PI);
+          ctx.arc(x, y, scaledDotRadius, 0, 2 * Math.PI);
           ctx.fillStyle = '#00ff00';
           ctx.fill();
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = scaledDotStroke;
           ctx.stroke();
         }
       });
@@ -1242,23 +1500,17 @@
       ctx.fillText(text, x, y - 8);
     }
 
-    // MediaPipe initialization
     async function initPoseLandmarker() {
-      console.log('[MediaPipe] Initializing...');
       try {
         // 注意: poseLandmarker.close() は WebGL コンテキストを破棄するため呼ばない。
         // 既存インスタンスがあれば null にして GC に任せる（close は呼ばない）。
         if (poseLandmarker) {
-          console.log('[MediaPipe] Replacing previous instance (not closing to preserve WebGL context)');
           poseLandmarker = null;
         }
 
-        console.log('[MediaPipe] Loading vision tasks...');
         const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
-        console.log('[MediaPipe] Vision tasks loaded');
 
         const create = async (delegate) => {
-          console.log('[MediaPipe] Creating PoseLandmarker with', delegate, 'delegate...');
           return await PoseLandmarker.createFromOptions(vision, {
             baseOptions: {
               modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
@@ -1274,14 +1526,11 @@
 
         try {
           poseLandmarker = await create('GPU');
-          console.log('[MediaPipe] ✅ GPU delegate initialized');
         } catch (gpuErr) {
           console.warn('[MediaPipe] ⚠️ GPU delegate failed, fallback to CPU:', gpuErr);
           poseLandmarker = await create('CPU');
-          console.log('[MediaPipe] ✅ CPU delegate initialized');
         }
 
-        console.log('[MediaPipe] ✅ Initialization complete');
         showNotification('MediaPipe初期化完了', 'success');
         return true;
       } catch (error) {
@@ -1291,17 +1540,15 @@
       }
     }
 
-
-    // Chart lifecycle moved to src/ui/charts.js
-
-
-    // Camera preview loop with pose detection
     let previewAnimationId = null;
 
     function startCameraPreview() {
-      let previewPrevLandmarks = null;
       let previewPrevWorldLandmarks = null;
       let previewPrevMpTimestamp = null;
+      // 最初の数フレームはMediaPipeが前回の検出結果を返すことがあるため
+      // ランドマーク描画を抑制してちらつきを防ぐ。
+      let previewWarmupFrames = 0;
+      const PREVIEW_WARMUP_FRAMES = 3;
 
       async function drawPreview() {
         if (!videoElement.srcObject && !videoElement.src) {
@@ -1314,22 +1561,53 @@
           previewAnimationId = null;
           return;
         }
+        // エクスポート生成中はプレビューループを停止する。
+        // renderAnalyzedVideoBlob は exportCanvas（オフスクリーン）に描画するが、
+        // drawPreview が同時に canvasCtx（メインキャンバス）へ detectForVideo を
+        // 呼び出すと、MediaPipe の GPU コンテキストが競合しカクツキや
+        // ランドマーク重複描画の原因になる。
+        if (isGeneratingAnalyzedPreview) {
+          cancelAnimationFrame(previewAnimationId);
+          previewAnimationId = null;
+          return;
+        }
 
         if (videoElement.readyState >= 2) {
           const previewW = canvasElement.width;
           const previewH = canvasElement.height;
           const previewVW = videoElement.videoWidth;
           const previewVH = videoElement.videoHeight;
-          const previewRect = calcVideoDrawRect(previewW, previewH, previewVW, previewVH);
 
+          // Draw the current video frame (works when playing or paused, as long
+          // as readyState >= 2 guarantees decoded pixel data is available).
+          // Skip pose detection when paused to avoid timestamp errors.
+          const previewRect = calcVideoDrawRect(previewW, previewH, previewVW, previewVH);
           canvasCtx.clearRect(0, 0, previewW, previewH);
           canvasCtx.drawImage(videoElement, previewRect.x, previewRect.y, previewRect.w, previewRect.h);
 
-          // Detect and draw pose in preview mode
-          if (poseLandmarker) {
+          // Detect and draw pose in preview mode (only while playing)
+          if (poseLandmarker && !videoElement.paused) {
             try {
+              // 解析開始直前に drawImage したが isAnalyzing がまだ false の場合、
+              // detectForVideo を呼ぶ前にもう一度チェックして競合を回避する
+              if (isAnalyzing) {
+                cancelAnimationFrame(previewAnimationId);
+                previewAnimationId = null;
+                return;
+              }
+              // タイムスタンプは drawImage 直後に取得（canvasElement は固定フレーム済み）
               const mpTimestamp = getCurrentMediaPipeTimestamp();
-              const results = await poseLandmarker.detectForVideo(videoElement, mpTimestamp);
+              // canvasElement（固定フレーム）を渡すことで、推論中に動画が進んでも
+              // ランドマークと映像フレームが一致する
+              // Record the timestamp so startAnalysis() can guarantee monotonicity.
+              lastDetectForVideoTimestamp = Math.max(lastDetectForVideoTimestamp, mpTimestamp);
+              isPreviewDetecting = true;
+              let results;
+              try {
+                results = await poseLandmarker.detectForVideo(canvasElement, mpTimestamp);
+              } finally {
+                isPreviewDetecting = false;
+              }
 
               // await 完了後に再チェック：解析が開始されていたら描画をスキップ
               if (isAnalyzing) {
@@ -1338,19 +1616,29 @@
                 return;
               }
 
+              // ウォームアップカウンタを更新（ランドマーク有無に関わらずカウント）
+              previewWarmupFrames++;
+
               if (results.landmarks && results.landmarks.length > 0) {
                 const landmarks = results.landmarks[0];
                 const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
-                drawEnhancedLandmarks(landmarks, worldLandmarks, false,
-                  canvasCtx, previewW, previewH, previewVW, previewVH);
+                // detectForVideo(canvasElement, ...) はキャンバス全体で正規化するため
+                // videoW/H を渡すと calcVideoDrawRect が黒帯オフセットを二重適用しずれる。
+                // videoW=0/videoH=0 → rect={x:0,y:0,w:cW,h:cH} で正しいcanvas座標になる。
+                // ウォームアップ中（最初の数フレーム）はMediaPipeが前回の結果を返すため
+                // ランドマーク描画をスキップして、ちらつき・位置ずれを防ぐ。
+                if (previewWarmupFrames > PREVIEW_WARMUP_FRAMES) {
+                  drawEnhancedLandmarks(landmarks, worldLandmarks, false,
+                    canvasCtx, previewW, previewH, 0, 0);
+                }
 
                 const deltaT = (previewPrevMpTimestamp != null) ? (mpTimestamp - previewPrevMpTimestamp) : 0;
 
                 if (worldLandmarks && deltaT > 0 && previewPrevWorldLandmarks) {
                   // 前額面では関節角度を計算しない
                   const angles = currentPlane === 'sagittal' ? calcJointAngles(worldLandmarks) : null;
-                  const trunkAngle = calcTrunkAngle(worldLandmarks);
-                  const pelvicTilt = calcPelvicTilt(worldLandmarks);
+                  const trunkAngle = calcTrunkAngle(worldLandmarks, currentPlane);
+                  const pelvicTilt = calcPelvicTilt(worldLandmarks, currentPlane);
                   const speed = calcWalkingSpeed(worldLandmarks, previewPrevWorldLandmarks, deltaT);
 
                   // Preview values (cadence is omitted in preview)
@@ -1369,15 +1657,9 @@
                     rightAnkle: angles && isFinite(angles.rightAnkle) ? angles.rightAnkle : 0
                   };
 
-                  // Debug log (every 30 frames)
-                  if ((Math.floor(mpTimestamp / 33)) % 30 === 0) {
-                    console.log('[Preview] Speed:', speed.toFixed(3), 'm/s | Trunk:', trunkAngle.toFixed(2), '\u00b0 | deltaT:', deltaT.toFixed(1), 'ms');
-                  }
-
                   chartController.updateCharts(previewData);
                 }
 
-                previewPrevLandmarks = landmarks;
                 previewPrevWorldLandmarks = worldLandmarks;
                 previewPrevMpTimestamp = mpTimestamp;
               }
@@ -1400,8 +1682,6 @@
       }
     }
 
-
-    // Camera
     async function startCamera({ showSuccessNotification = true } = {}) {
       try {
         prepareForNewCaptureSession({ resetCharts: true });
@@ -1415,10 +1695,7 @@
 
         // MediaPipe は初回のみ初期化（再初期化は WebGL context lost を引き起こす）。
         if (!poseLandmarker) {
-          console.log('[Camera] Initializing MediaPipe for first time...');
           await initPoseLandmarker();
-        } else {
-          console.log('[Camera] MediaPipe already initialized — reusing existing instance');
         }
 
         const constraints = buildCameraConstraints({
@@ -1522,12 +1799,10 @@
     }
 
     async function loadVideoFile() {
-      console.log('[Video] loadVideoFile() called');
       prepareForNewCaptureSession({ resetCharts: true });
 
       // Prevent concurrent loads
       if (isLoadingVideo) {
-        console.warn('[Video] Already loading a video, please wait...');
         showNotification('動画を読み込み中です。少々お待ちください。', 'warning');
         return;
       }
@@ -1545,13 +1820,9 @@
         disposeVideoFileInput({ input });
       };
 
-      console.log('[Video] File input created, opening dialog...');
-
       input.onchange = async (e) => {
-        console.log('[Video] File selected');
         const file = e.target.files[0];
         if (!file) {
-          console.log('[Video] No file selected');
           cleanupInput();
           return;
         }
@@ -1560,10 +1831,8 @@
 
         isLoadingVideo = true;
         syncPhoneStageActions();
-        console.log('[Video] Starting load process for:', file.name);
 
         try {
-          console.log('[Video] Loading:', file.name, (file.size / (1024*1024)).toFixed(2), 'MB');
           showNotification('動画を読み込み中...', 'info');
 
           ({
@@ -1592,27 +1861,25 @@
 
           // Create new video URL
           videoFileUrl = URL.createObjectURL(file);
+          // オリジナル Blob を保持（iOS Safari では fetch(objectURL) が制限されるため）
+          videoFileBlob = file;
           originalPreviewUrl = revokePreviewUrl(originalPreviewUrl);
           originalPreviewUrl = videoFileUrl;
           clearAnalyzedPreviewState();
+          _wcCodecCache = null; // 新しい動画ではコーデックキャッシュをリセット
           syncPhoneVideoPreviews();
           videoEpochBaseMs = null;
-          console.log('[Video] Object URL created:', videoFileUrl.substring(0, 50) + '...');
 
           // iOS/Safari stability
           configureVideoElementForFile(videoElement);
-          console.log('[Video] Video element configured');
 
           // Setup load handler (loadedmetadata can be unreliable -> fallback to canplay/loadeddata)
-          console.log('[Video] Waiting for video to load...');
           await waitForVideoLoad({
             videoElement,
             src: videoFileUrl,
             timeoutMs: 30000,
             logger: console
           });
-
-          console.log('[Video] Promise resolved - video loaded');
 
           // Setup ended handler
           // NOTE: Do NOT call ensureAnalyzedPreviewReady() here.
@@ -1621,6 +1888,11 @@
           // Analyzed preview generation is deferred to when the user explicitly
           // requests it (save button), or via the deferred background path below.
           videoElement.onended = async () => {
+            // 再入防止: onended ハンドラーを即座にクリアして二重発火を防ぐ。
+            // renderAnalyzedVideoBlob が videoElement.src をクリアして load() を呼ぶと
+            // iOS/Safari では ended イベントが再発火することがある。
+            dbgLog('[onended] fired! isAnalyzing=' + isAnalyzing + ' analysisData=' + analysisData.length + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null'));
+            videoElement.onended = null;
             if (isAnalyzing) {
               await finalizeSession();
               stopAllProcessing();
@@ -1628,7 +1900,31 @@
               // btn-save-analyzed-video も有効化・syncPhoneQuickActions も呼ばれるため
               // ここでは追加通知のみ行う
               if (videoFileUrl && analysisData.length > 0) {
-                showNotification('解析完了！「解析動画」ボタンから保存できます。', 'success');
+                showNotification('解析完了！', 'success');
+                // phone モードでは解析後プレビューを自動生成して即座に表示する。
+                // renderAnalyzedVideoBlob は videoElement.src を一時クリアして
+                // オフスクリーンデコーダーを使うため、onended ハンドラが完全に
+                // 終了してから（= イベントループを 1 周挟んでから）実行する。
+                // 直接 await すると onended コールバック内で src が変わり、
+                // ブラウザが videoElement をリセットして初期画面に戻るケースがある。
+                if (deviceMode === 'phone') {
+                  setTimeout(async () => {
+                    dbgLog('[AutoPreview] 200ms setTimeout fired. phoneFlowView=' + phoneFlowView + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' analysisData=' + analysisData.length);
+                    try {
+                      await ensureAnalyzedPreviewReady({ notify: false });
+                      dbgLog('[AutoPreview] SUCCESS: preview generated. phoneFlowView=' + phoneFlowView);
+                      showNotification('解析プレビューを表示しました。下にスクロールして確認できます。', 'success');
+                    } catch (e) {
+                      // 自動生成に失敗しても致命的ではない — ユーザーがボタンから手動生成可能
+                      dbgLog('[AutoPreview] FAILED: code=' + e?.code + ' msg=' + e?.message + ' phoneFlowView=' + phoneFlowView);
+                      console.warn('[AutoPreview] 自動プレビュー生成に失敗 phoneFlowView=' + phoneFlowView + ' analysisData.length=' + analysisData.length, e);
+                    }
+                    dbgLog('[AutoPreview] setTimeout callback DONE. phoneFlowView=' + phoneFlowView);
+                  }, 200);
+                }
+              } else if (videoFileUrl && analysisData.length === 0) {
+                // 解析データが1件も取れなかった場合（動画が短すぎる・ランドマーク未検出など）
+                showNotification('解析データが取得できませんでした。動画に人物が映っているか確認してください。', 'warning');
               }
             }
           };
@@ -1638,42 +1934,27 @@
           // 破壊され「WebGL: context lost」→「program.name=id」エラーが連鎖する。
           // タイムスタンプのリセットは startAnalysis() 内の mpTimestampOffset で行う。
           if (!poseLandmarker) {
-            console.log('[Video] Initializing MediaPipe for first time...');
             await initPoseLandmarker();
-          } else {
-            console.log('[Video] MediaPipe already initialized — reusing existing instance');
           }
 
-          // Resize canvas and draw first frame
-          resizeCanvas();
-
-          // Draw first frame if video is ready (letterbox-aware)
-          if (videoElement.readyState >= 2) {
-            const firstFrameRect = calcVideoDrawRect(
-              canvasElement.width, canvasElement.height,
-              videoElement.videoWidth, videoElement.videoHeight
-            );
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(videoElement,
-              firstFrameRect.x, firstFrameRect.y, firstFrameRect.w, firstFrameRect.h);
-            console.log('[Video] First frame drawn (rect:', JSON.stringify({
-              x: Math.round(firstFrameRect.x), y: Math.round(firstFrameRect.y),
-              w: Math.round(firstFrameRect.w), h: Math.round(firstFrameRect.h)
-            }), ')');
-          } else {
-            console.log('[Video] Video not fully ready yet, first frame will be drawn on play');
-          }
-
-          // Update UI
+          // Update UI first so canvas-container becomes visible before resize
           const recordBtn = document.getElementById('btn-record');
           setRecordButtonForVideoMode(recordBtn);
           syncDeviceModeUi();
 
+          // Resize canvas
+          resizeCanvas();
+
+          // waitForVideoLoad now guarantees readyState >= 2, so the video
+          // element has decoded pixel data.  Start the preview loop — it draws
+          // every frame including while paused (readyState >= 2 guard).
+          startCameraPreview();
+
           showNotification('動画読み込み完了', 'success');
-          console.log('[Video] Load complete - ready to start analysis');
 
         } catch (error) {
-          console.error('[Video] Error:', error);
+          dbgLog('[loadVideoFile] ERROR: code=' + error?.code + ' msg=' + error?.message);
+          console.error('[Video] Error (loadVideoFile catch — phoneFlowView will reset to capture):', error);
           if (error?.code !== 'POSE_INIT_FAILED') {
             showNotification('動画読み込みエラー: ' + error.message, 'error');
           }
@@ -1694,19 +1975,16 @@
       };
 
       input.oncancel = () => {
-        console.log('[Video] File selection canceled');
         cleanupInput();
       };
 
       // CRITICAL: Must call click() synchronously in the same event loop
       // Some browsers block programmatic click() if there's any async operation before it
-      console.log('[Video] Calling input.click()...');
       try {
-        const triggerMethod = triggerVideoFilePicker({
+        triggerVideoFilePicker({
           input,
           logger: console
         });
-        console.log(`[Video] File picker triggered via ${triggerMethod}`);
         cleanupTimer = setTimeout(() => {
           cleanupInput();
         }, 60000);
@@ -1717,8 +1995,8 @@
       }
     }
 
-
     async function finalizeSession() {
+      dbgLog('[finalizeSession] analysisData=' + analysisData.length + ' phoneFlowView=' + phoneFlowView);
       if (analysisData.length === 0) return;
       try {
         const sessionData = buildSessionRecord({
@@ -1745,20 +2023,16 @@
       }
     }
 
-    // Analysis
     async function startAnalysis() {
       if (isStartingAnalysis) {
-        console.warn('[Analysis] Start request ignored: already starting');
         return false;
       }
       if (isAnalyzing) {
-        console.log('[Analysis] Start request ignored: already running');
         return true;
       }
 
       isStartingAnalysis = true;
       try {
-        console.log('[Analysis] Starting...');
         resetAnalysisOutputButtons();
 
         if (!poseLandmarker) {
@@ -1767,16 +2041,49 @@
         }
 
         ({
+          animationFrameId,
           previewAnimationId,
           videoFrameCallbackHandle
         } = cancelScheduledMediaWork({
+          animationFrameId,
           previewAnimationId,
           cancelAnimationFrameFn: cancelAnimationFrame,
           videoElement,
           videoFrameCallbackHandle
         }));
 
-      // For video files: start playback (SIMPLIFIED)
+        // ── プレビュー detectForVideo の完了を待機 ──────────────────────────────
+        // cancelScheduledMediaWork でプレビューの rAF はキャンセルされるが、
+        // プレビューが既に detectForVideo を await 中の場合はその完了を待つ必要がある。
+        // isPreviewDetecting が true のまま startAnalysis が先に detectForVideo を
+        // 呼ぶと MediaPipe に同時2本の推論が走り結果が混在する（特に GPU バックエンド）。
+        // 最大 300ms 待機し、それでも解決しない場合は強行する（ユーザー操作を止めない）。
+        if (isPreviewDetecting) {
+          dbgLog('[startAnalysis] waiting for preview detectForVideo to finish...');
+          const waitStart = Date.now();
+          while (isPreviewDetecting && Date.now() - waitStart < 300) {
+            await new Promise(resolve => setTimeout(resolve, 16));
+          }
+          dbgLog('[startAnalysis] preview detect wait done. isPreviewDetecting=' + isPreviewDetecting);
+        }
+
+        // ── onended ハンドラーをクリア ──────────────────────────────────────────
+        // 解析開始のたびに onended を明示的にクリアする。
+        // renderAnalyzedVideoBlob の finally で onended が再登録される場合があり、
+        // 古いハンドラーが残ったまま新しい解析を開始すると、動画終了時に
+        // 旧ハンドラーと新ハンドラーが二重で動作するリスクがある。
+        // startAnalysis() の末尾で scheduleNext() が呼ばれた後、
+        // 新しい onended は動画終端時に正しく finalizeSession() を呼ぶ。
+        // ここでは一旦クリアのみ行い、実際の再登録は解析ループ開始直後に行う。
+        if (videoFileUrl && videoElement) {
+          videoElement.onended = null;
+          dbgLog('[startAnalysis] onended cleared before starting new analysis');
+        }
+
+      // For video files: seek to start, ensure readyState≥2, then PAUSE.
+      // We register requestVideoFrameCallback BEFORE calling play() so the
+      // callback fires on the very first decoded frame — keeping currentTime
+      // (and therefore analysisVideoStartMs) as close to 0 as possible.
         if (videoFileUrl) {
           try {
             ({ videoEpochBaseMs } = await startVideoPlaybackForAnalysis({
@@ -1785,27 +2092,37 @@
               now: () => Date.now()
             }));
           } catch (e) {
-            console.error('[Analysis] Video play() failed:', e);
             showNotification('動画の再生に失敗しました', 'error');
             return false;
           }
+          // Pause immediately after the browser confirms playback has started.
+          // All setup (offset, resize, state init) runs while the video is paused,
+          // so currentTime does NOT advance during the setup phase.
+          // We will call play() again just before (or after) registering rVFC,
+          // which guarantees the first processed frame is at the smallest
+          // possible currentTime (≈ one frame interval, e.g. 33 ms at 30 fps).
+          videoElement.pause();
         } else {
           videoEpochBaseMs = null;
         }
 
       // For video mode: ensure MediaPipe receives a monotonically increasing
-      // timestamp. On the second (and subsequent) runs on the same video file,
-      // videoElement.currentTime resets to 0 which would produce a timestamp
-      // smaller than the last timestamp used in the previous run.
-      // We calculate an offset so that currentTime=0 maps to
-      // (lastAnalysisMpTimestamp + 1000ms), satisfying MediaPipe's strict requirement.
+      // timestamp. After seeking back to 0, currentTime resets which would
+      // produce a timestamp smaller than the last one used by detectForVideo()
+      // (either in a previous analysis run or in the preview loop).
+      // We compute an offset so currentTime=0 maps to at least
+      // (lastDetectForVideoTimestamp + 1000ms), satisfying MediaPipe's strict
+      // monotonicity requirement from the very first frame.
         if (videoFileUrl) {
-          if (lastAnalysisMpTimestamp > 0) {
-            // After the seek, currentTime will be 0, so raw timestamp = 0 + offset.
-            // Set offset so that timestamp starts 1000ms after the last used value.
-            mpTimestampOffset = lastAnalysisMpTimestamp + 1000;
+          // Use the highest timestamp ever sent to detectForVideo across both
+          // the preview loop and previous analysis runs, then add a 1000 ms gap.
+          const highestPreviousTimestamp = Math.max(lastAnalysisMpTimestamp, lastDetectForVideoTimestamp);
+          if (highestPreviousTimestamp > 0) {
+            // After the seek, currentTime will be ~0, so raw timestamp ≈ 0 + offset.
+            // Set offset so that timestamp starts ≥1000ms after the last used value.
+            mpTimestampOffset = highestPreviousTimestamp + 1000;
           }
-          // else: first run, offset stays at its current value (0)
+          // else: first run with no prior detectForVideo calls, offset stays at 0
         } else {
           mpTimestampOffset = 0;
         }
@@ -1817,6 +2134,42 @@
         // 解析開始時点で videoWidth/videoHeight に合わせてリサイズし、
         // 以降の描画はその固定値を使う。
         resizeCanvas();
+
+        // ── スマホ動画モードのキャンバスサイズ保証 ──────────────────────────────
+        // スマホ動画モードでは #canvas-container が display:none になるため
+        // resizeCanvas() 内の clientWidth/Height が 0 になりスキップされる。
+        // その結果 canvasElement.width/height が 0 のまま解析が開始され、
+        // detectForVideo に空キャンバスが渡されてランドマーク検出ゼロになる。
+        //
+        // 修正: resizeCanvas() 後も canvas サイズが 0 の場合は、
+        // 動画のネイティブ解像度を直接使ってキャンバスを設定する。
+        // 最大幅は 1280px にスケールダウンして VRAM を節約する。
+        if ((canvasElement.width === 0 || canvasElement.height === 0) &&
+            videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+          const MAX_CANVAS_PX = 1280;
+          const vW = videoElement.videoWidth;
+          const vH = videoElement.videoHeight;
+          const scale = Math.min(1, MAX_CANVAS_PX / Math.max(vW, vH));
+          const pxW = Math.max(1, Math.round(vW * scale));
+          const pxH = Math.max(1, Math.round(vH * scale));
+          canvasElement.width  = pxW;
+          canvasElement.height = pxH;
+          dbgLog('[startAnalysis] canvas was 0x0 (container hidden) — forced to ' + pxW + 'x' + pxH + ' from video ' + vW + 'x' + vH);
+        }
+
+        // ── ブラックアウト防止: resizeCanvas() はキャンバスをクリアするため、
+        // scheduleNext() で最初のフレームが届くまでの間（~33ms）キャンバスが
+        // 真っ黒になる。リサイズ直後に現在のビデオフレームを描画することで
+        // その空白を埋める。
+        if (videoElement.readyState >= 2 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+          const cW = canvasElement.width;
+          const cH = canvasElement.height;
+          const vW = videoElement.videoWidth;
+          const vH = videoElement.videoHeight;
+          const rect = calcVideoDrawRect(cW, cH, vW, vH);
+          canvasCtx.clearRect(0, 0, cW, cH);
+          canvasCtx.drawImage(videoElement, rect.x, rect.y, rect.w, rect.h);
+        }
 
       // Reset analysis state
         isAnalyzing = true;
@@ -1832,15 +2185,34 @@
           gaitEvents,
           stepCount,
           lastHeelStrikeTime,
+          lastLeftHeelStrikeTime,
+          lastRightHeelStrikeTime,
+          leftHeelState,
+          rightHeelState,
+          emaLeftHeelY,
+          emaRightHeelY,
+          leftSwingPeak,
+          rightSwingPeak,
+          leftEventCount,
+          rightEventCount,
+          leftHadDownPhase,
+          rightHadDownPhase,
           emaValues
         } = createStartedAnalysisState({
           createInitialEmaValues,
           now: () => Date.now()
         }));
+        // analysisVideoStartMs は createStartedAnalysisState に含まれないため、
+        // 解析開始時に明示的にリセットする（最初のフレーム処理時に再設定される）
+        kneePeakTracker = new KneePeakTracker();
+        analysisVideoStartMs = 0;
+        analysisVideoWidth = 0;
+        analysisVideoHeight = 0;
+        analysisCanvasWidth = 0;
+        analysisCanvasHeight = 0;
 
       // Start charts
         chartController.startCharts();
-        console.log('[Analysis] Analysis started successfully');
 
       // Update button for video mode
         if (videoFileUrl) {
@@ -1852,13 +2224,13 @@
         // resize イベントで変わった場合にズレるため、開始時点の値を固定する。
         const analysisCanvasW = canvasElement.width;
         const analysisCanvasH = canvasElement.height;
-        console.log('[Analysis] Canvas locked at', analysisCanvasW, 'x', analysisCanvasH,
-          '| video:', videoElement.videoWidth, 'x', videoElement.videoHeight,
-          '| arMatch:', Math.abs(videoElement.videoWidth / videoElement.videoHeight
-            - analysisCanvasW / analysisCanvasH) < 0.002 ? 'OK ✓' : 'MISMATCH ⚠ (will cause marker offset)');
+        // エクスポート時のランドマーク座標変換のためモジュール変数にも保存
+        analysisCanvasWidth  = analysisCanvasW;
+        analysisCanvasHeight = analysisCanvasH;
 
         let frameCount = 0;
         let lastMpTimestamp = -1;
+        let isProcessingFrame = false; // detectForVideo の await 中は true
 
         const scheduleNext = () => {
           // Re-read isAnalyzing at schedule time (not closure-captured value)
@@ -1880,131 +2252,280 @@
           // Guard: if analysis was stopped between the time this frame was
           // scheduled and now, bail out immediately without scheduling the next frame.
           if (!isAnalyzing) {
-            console.log('[Analysis] processFrame: isAnalyzing is false, stopping loop');
             return;
           }
-          const mpTimestamp = getCurrentMediaPipeTimestamp();
-          const framePlan = prepareAnalysisFrame({
-            isAnalyzing,
-            readyState: videoElement.readyState,
-            isVideoMode: !!videoFileUrl,
-            isPaused: videoElement.paused,
-            mpTimestamp,
-            lastMpTimestamp,
-            frameCount,
-            analysisStartMpTimestamp
-          });
-          if (framePlan.shouldStop) {
-            console.log('[Analysis] Stopped');
-            return;
-          }
-          if (framePlan.shouldSkip) {
+
+          // ── 並行実行防止ガード ─────────────────────────────────────────────────
+          // detectForVideo は await で 50〜200ms かかるが、その間にも rVFC / rAF が
+          // 次のフレームで processFrame を呼び出すことがある。
+          // 前の detectForVideo がまだ実行中（isProcessingFrame=true）の場合は
+          // そのフレームをスキップして次を待つ。
+          // これにより canvasElement への drawImage 競合を防ぎ、
+          // analysisData のランドマークが正しいフレームに対応することを保証する。
+          if (isProcessingFrame) {
             scheduleNext();
             return;
           }
 
-          frameCount = framePlan.nextFrameCount;
-          analysisFrameCount = frameCount;
-          const prevAnalysisStartMpTimestamp = analysisStartMpTimestamp;
-          analysisStartMpTimestamp = framePlan.nextAnalysisStartMpTimestamp;
-          // On the very first analysed frame, record the video's absolute currentTime
-          // and video dimensions so the export pipeline can use the same time base
-          // and landmark normalisation reference as analysisData.elapsedMs / landmarks.
-          if (prevAnalysisStartMpTimestamp == null && analysisStartMpTimestamp != null) {
-            analysisVideoStartMs = videoElement.currentTime * 1000;
-            analysisVideoWidth  = videoElement.videoWidth;
-            analysisVideoHeight = videoElement.videoHeight;
-            console.log('[Analysis] First frame: videoSize', analysisVideoWidth, 'x', analysisVideoHeight,
-              '| canvasSize', canvasElement.width, 'x', canvasElement.height);
+          // ── ステージ1: Pre-draw ゲートチェック ────────────────────────────────
+          // readyState / paused / ended をチェック。タイムスタンプ比較はまだ行わない。
+          // このチェックは drawImage より前に行うことで不要な canvas 書き込みを防ぐ。
+          //
+          // ended=true の場合: onended ハンドラーが遅延・未発火でも解析を安全停止する。
+          // ただし frameCount===0（まだ1フレームも処理していない）の場合は停止しない。
+          // これは別動画の解析開始直後に、前の動画の ended 状態が一瞬残るケースや
+          // play() が非同期で完了する前に rAF が発火するブラウザのタイミング問題で
+          // 解析が即座に停止してしまう不具合（矢状面への切り替え後に解析できない）を防ぐ。
+          {
+            const preDraw = shouldSkipPreDraw({
+              readyState: videoElement.readyState,
+              isVideoMode: !!videoFileUrl,
+              isPaused: videoElement.paused,
+              isEnded: videoElement.ended
+            });
+            if (preDraw.skip) {
+              if (preDraw.ended && frameCount > 0) {
+                // 動画終端に達したが onended が未発火 or 遅延しているケース
+                // → 安全網として解析を停止する（finalizeSession は onended 側に任せる）
+                // frameCount > 0 を条件にすることで、解析開始直後の誤検知を防ぐ
+                console.warn('[Analysis] video.ended detected in processFrame loop (frameCount=' + frameCount + ') — calling stopAllProcessing() as safety net');
+                stopAllProcessing();
+                return;
+              }
+              scheduleNext();
+              return;
+            }
           }
-          const elapsedMs = framePlan.elapsedMs;
-          lastMpTimestamp = framePlan.nextLastMpTimestamp;
-          // Mirror to outer scope so startAnalysis can calculate mpTimestampOffset
-          // on the next run without relying on videoElement.currentTime (which will
-          // already be 0 after the seek).
-          lastAnalysisMpTimestamp = lastMpTimestamp;
 
-          // ── このフレームを先に描画してからdetectForVideoを呼ぶ ──────────────
-          // detectForVideo は async で数十ms かかる間も動画は進み続けるため、
-          // await 後に drawImage すると描画フレームがランドマークより先に進んでしまう。
-          // drawImage でこのフレームを canvas に固定 → detectForVideo を呼ぶ順にする。
+          // ── ステージ2: drawImage でフレームを canvas に固定 ───────────────────
+          // detectForVideo(videoElement, ...) は非同期で 50〜200ms かかるが、
+          // その間も videoElement は再生し続ける。
+          // canvasElement（drawImage で固定済みの静止フレーム）を detectForVideo に
+          // 渡すことで、推論中も映像が進んでいても常に「描画したフレームT」の
+          // 姿勢を推定できる。
           const analysisVW = videoElement.videoWidth;
           const analysisVH = videoElement.videoHeight;
           const analysisRect = calcVideoDrawRect(analysisCanvasW, analysisCanvasH, analysisVW, analysisVH);
           canvasCtx.clearRect(0, 0, analysisCanvasW, analysisCanvasH);
           canvasCtx.drawImage(videoElement, analysisRect.x, analysisRect.y, analysisRect.w, analysisRect.h);
-          // drawImage 直後（= このフレームのcurrentTime）のタイムスタンプで検出
+
+          // ── ステージ3: drawImage直後にタイムスタンプを確定 ─────────────────────
+          // drawImage完了直後に取得するため、canvasElement に描画されたフレームの
+          // currentTime と正確に一致する。
+          // rVFC 環境では video が paused されているので pre-draw 取得と同値だが、
+          // rAF フォールバック環境では clearRect + drawImage の実行中に
+          // video.currentTime が進む可能性があるため post-draw 取得が正確。
           const detectTimestamp = getCurrentMediaPipeTimestamp();
 
-          const results = await poseLandmarker.detectForVideo(videoElement, detectTimestamp);
+          // ── ステージ4: Post-draw タイムスタンプ単調性チェック ──────────────────
+          // detectTimestamp <= lastMpTimestamp の場合は同じフレームを再処理しない。
+          // このチェックを drawImage 後に行うことで、mpTimestamp（pre-draw）と
+          // lastMpTimestamp（前回の detectTimestamp）の非対称比較を避ける。
+          if (shouldSkipPostDraw({
+            isVideoMode: !!videoFileUrl,
+            detectTimestamp,
+            lastMpTimestamp
+          })) {
+            scheduleNext();
+            return;
+          }
 
-          if (frameCount % 30 === 0) {
-            console.log('[Analysis] Frame', frameCount, '| Time:', (mpTimestamp/1000).toFixed(2), 's');
+          // ── フレームカウント更新（実際に処理するフレームのみ） ──────────────────
+          frameCount += 1;
+          analysisFrameCount = frameCount;
+
+          // detectTimestampを使って分析状態を更新（すべて post-draw タイムスタンプ基準）
+          const prevAnalysisStartMpTimestamp = analysisStartMpTimestamp;
+          analysisStartMpTimestamp = prevAnalysisStartMpTimestamp == null
+            ? detectTimestamp
+            : prevAnalysisStartMpTimestamp;
+          lastMpTimestamp = detectTimestamp;
+          // Mirror to outer scope so startAnalysis can calculate mpTimestampOffset
+          // on the next run without relying on videoElement.currentTime (which will
+          // already be 0 after the seek).
+          lastAnalysisMpTimestamp = lastMpTimestamp;
+
+          // On the very first analysed frame, record the video's absolute currentTime
+          // and video dimensions so the export pipeline can use the same time base
+          // and landmark normalisation reference as analysisData.elapsedMs / landmarks.
+          //
+          // analysisVideoStartMs = detectTimestamp - mpTimestampOffset
+          //   = currentTime_at_drawImage * 1000
+          // This is the exact video position at which the canvas was frozen, so
+          //   getSafeVideoElapsedMs(exportVideo) - analysisVideoStartMs
+          // will precisely match
+          //   detectTimestamp - analysisStartMpTimestamp (== elapsedMs)
+          // for every exported frame.
+          if (prevAnalysisStartMpTimestamp == null && analysisStartMpTimestamp != null) {
+            analysisVideoStartMs = analysisStartMpTimestamp - mpTimestampOffset;
+            analysisVideoWidth  = videoElement.videoWidth;
+            analysisVideoHeight = videoElement.videoHeight;
+            console.log('[Analysis] first frame | detectTimestamp:', detectTimestamp.toFixed(1),
+              '| mpTimestampOffset:', mpTimestampOffset,
+              '| analysisVideoStartMs:', analysisVideoStartMs.toFixed(1),
+              '| videoCurrentTime:', videoElement.currentTime.toFixed(4));
+          }
+          const elapsedMs = Math.max(0, detectTimestamp - analysisStartMpTimestamp);
+          if (frameCount <= 3) {
+            console.log('[Analysis] frame', frameCount,
+              '| detectTimestamp:', detectTimestamp.toFixed(1),
+              '| elapsedMs:', elapsedMs.toFixed(1),
+              '| videoCurrentTime:', videoElement.currentTime.toFixed(4));
+          }
+
+          // canvasElement（固定フレーム）を渡して推論 → ランドマークと映像が常に一致
+          // Record the timestamp so subsequent runs maintain monotonicity.
+          lastDetectForVideoTimestamp = Math.max(lastDetectForVideoTimestamp, detectTimestamp);
+          isProcessingFrame = true;
+          let results;
+          try {
+            results = await poseLandmarker.detectForVideo(canvasElement, detectTimestamp);
+          } finally {
+            isProcessingFrame = false;
+          }
+
+          // await 完了後に解析が停止されていた場合は後処理をスキップ
+          if (!isAnalyzing) {
+            return;
           }
 
           if (results.landmarks && results.landmarks.length > 0) {
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
 
-            // ── マーカーズレ診断ログ（最初の3フレームのみ） ────────────────
-            if (frameCount <= 3) {
-              const lmHip = landmarks[LM.LEFT_HIP];
-              console.log('[Align] frame', frameCount,
-                '| videoSize:', analysisVW, 'x', analysisVH,
-                '| canvas:', analysisCanvasW, 'x', analysisCanvasH,
-                '| rect:', JSON.stringify({x:Math.round(analysisRect.x),y:Math.round(analysisRect.y),w:Math.round(analysisRect.w),h:Math.round(analysisRect.h)}),
-                lmHip ? '| leftHip: (' + lmHip.x.toFixed(3) + ', ' + lmHip.y.toFixed(3) + ')'
-                       + ' → px: (' + Math.round(analysisRect.x + lmHip.x * analysisRect.w) + ', ' + Math.round(analysisRect.y + lmHip.y * analysisRect.h) + ')' : ''
-              );
-            }
-
+            // detectForVideo(canvasElement, ...) はランドマーク座標をキャンバス全体
+            // (黒帯を含む) で正規化する。そのため drawEnhancedLandmarks に videoW/H を
+            // 渡すと calcVideoDrawRect が黒帯オフセットを二重適用してしまい、
+            // マーカー位置がずれる。videoW=0/videoH=0 を渡すと内部で
+            //   rect = {x:0, y:0, w:acW, h:acH}
+            // となり lm_x=lm.x*acW / lm_y=lm.y*acH となって正しいキャンバス座標になる。
+            // (プレビューは detectForVideo(videoElement) → 動画サイズ正規化なので
+            //  videoW/H を渡す必要がある。解析ループだけこの修正が必要。)
             drawEnhancedLandmarks(landmarks, worldLandmarks, false,
-              canvasCtx, analysisCanvasW, analysisCanvasH, analysisVW, analysisVH);
+              canvasCtx, analysisCanvasW, analysisCanvasH, 0, 0);
 
-            const deltaT = (prevTimestamp != null) ? (mpTimestamp - prevTimestamp) : 0;
+            const deltaT = (prevTimestamp != null) ? (detectTimestamp - prevTimestamp) : 0;
             // 前額面では関節角度を計算しない（カメラが正面向きのため矢状面角度は無意味）
             const angles = (analysisPlane === 'sagittal' && worldLandmarks)
               ? calcJointAngles(worldLandmarks)
               : null;
-            const trunkAngle = worldLandmarks ? calcTrunkAngle(worldLandmarks) : 0;
-            const pelvicTilt = worldLandmarks ? calcPelvicTilt(worldLandmarks) : 0;
+            const trunkAngle = worldLandmarks ? calcTrunkAngle(worldLandmarks, analysisPlane) : 0;
+            const pelvicTilt = worldLandmarks ? calcPelvicTilt(worldLandmarks, analysisPlane) : 0;
             const speed = (prevWorldLandmarks && worldLandmarks && deltaT > 0)
               ? calcWalkingSpeed(worldLandmarks, prevWorldLandmarks, deltaT)
               : 0;
 
             // Use MediaPipe/video time axis for gait event timing (independent of playbackRate)
+            // State‑machine ベース: 左右独立タイマーで LEFT/RIGHT を独立して検出
             const gaitDetection = detectGaitEvent({
               landmarks,
               prevLandmarks,
-              timestamp: mpTimestamp,
+              worldLandmarks,
+              timestamp: detectTimestamp,
               lastHeelStrikeTime,
+              lastLeftHeelStrikeTime,
+              lastRightHeelStrikeTime,
+              leftHeelState,
+              rightHeelState,
+              emaLeftHeelY,
+              emaRightHeelY,
+              leftSwingPeak,
+              rightSwingPeak,
+              leftEventCount,
+              rightEventCount,
+              leftHadDownPhase,
+              rightHadDownPhase,
               logger: console
             });
-            lastHeelStrikeTime = gaitDetection.nextLastHeelStrikeTime;
+            lastHeelStrikeTime      = gaitDetection.nextLastHeelStrikeTime;
+            lastLeftHeelStrikeTime  = gaitDetection.nextLastLeftHeelStrikeTime;
+            lastRightHeelStrikeTime = gaitDetection.nextLastRightHeelStrikeTime;
+            leftHeelState   = gaitDetection.nextLeftHeelState;
+            rightHeelState  = gaitDetection.nextRightHeelState;
+            emaLeftHeelY    = gaitDetection.nextEmaLeftHeelY;
+            emaRightHeelY   = gaitDetection.nextEmaRightHeelY;
+            leftSwingPeak   = gaitDetection.nextLeftSwingPeak;
+            rightSwingPeak  = gaitDetection.nextRightSwingPeak;
+            leftEventCount  = gaitDetection.nextLeftEventCount;
+            rightEventCount = gaitDetection.nextRightEventCount;
+            leftHadDownPhase  = gaitDetection.nextLeftHadDownPhase;
+            rightHadDownPhase = gaitDetection.nextRightHadDownPhase;
             stepCount += gaitDetection.stepIncrement;
             if (gaitDetection.event) {
               gaitEvents.push(gaitDetection.event);
-              console.log('[Gait Event]', gaitDetection.event.type, 'at', (mpTimestamp / 1000).toFixed(2), 's');
+            }
+
+            // 膝関節ピーク追跡: 毎フレームの生角度をトラッカーへ渡す（矢状面のみ有効）
+            if (analysisPlane === 'sagittal' && angles) {
+              kneePeakTracker.update(angles.leftKnee, angles.rightKnee, gaitDetection.event);
+            }
+
+            // デバッグ: ケイデンス検出の詳細ログ（10フレームごと、またはイベント検出時）
+            if (frameCount <= 5 || frameCount % 10 === 0 || gaitDetection.event) {
+              const wLH = worldLandmarks?.[29]; // LEFT_HEEL (world)
+              const wRH = worldLandmarks?.[30]; // RIGHT_HEEL (world)
+              const _wlStr = `wL=${wLH?.y?.toFixed(3)??'n/a'} wR=${wRH?.y?.toFixed(3)??'n/a'}`;
+              const _stStr = `LS=${leftHeelState} RS=${rightHeelState}`;
+              const _pkStr = `lPk=${leftSwingPeak?.toFixed(3)??'null'} rPk=${rightSwingPeak?.toFixed(3)??'null'}`;
+              const _evStr = `lE=${leftEventCount} rE=${rightEventCount} lDn=${leftHadDownPhase} rDn=${rightHadDownPhase}`;
+              const _emStr = `emL=${emaLeftHeelY?.toFixed(3)??'null'} emR=${emaRightHeelY?.toFixed(3)??'null'}`;
+              const _dtStr = gaitDetection.event ? `DETECT:${gaitDetection.event.type}` : '';
+              console.log(`[GAIT] f=${frameCount} ts=${(detectTimestamp/1000).toFixed(2)} ${_wlStr} | ${_stStr} | ${_pkStr} | ${_evStr} | ${_emStr} | evts=${gaitEvents.length} ${_dtStr}`);
             }
 
             const cadence = calculateCadenceFromEvents({
               gaitEvents,
-              mpTimestamp
+              mpTimestamp: detectTimestamp
             });
 
             if (angles) {
               // 矢状面のみ: 関節角度 EMA を更新
-              emaValues.leftKnee = ema(emaValues.leftKnee, angles.leftKnee);
-              emaValues.rightKnee = ema(emaValues.rightKnee, angles.rightKnee);
-              emaValues.leftHip = ema(emaValues.leftHip, angles.leftHip);
-              emaValues.rightHip = ema(emaValues.rightHip, angles.rightHip);
-              emaValues.leftAnkle = ema(emaValues.leftAnkle, angles.leftAnkle);
-              emaValues.rightAnkle = ema(emaValues.rightAnkle, angles.rightAnkle);
+              // 最初の有効フレーム（prevTimestamp===null）は EMA=0 からの過渡応答を避けるため
+              // 実測値で直接初期化する。frameCount===1 ではなく prevTimestamp===null を条件にする。
+              // 理由: frameCount は drawImage 後に increment されるため、
+              // frameCount=1 でランドマーク検出失敗した場合に初期化がスキップされ
+              // 2フレーム目以降で ema(0, actual) から始まるウォームアップ遅延が発生する。
+              // prevTimestamp===null は「まだ有効フレームが1つも完了していない」状態を示す。
+              if (prevTimestamp === null) {
+                emaValues.leftKnee = angles.leftKnee;
+                emaValues.rightKnee = angles.rightKnee;
+                emaValues.leftHip = angles.leftHip;
+                emaValues.rightHip = angles.rightHip;
+                emaValues.leftAnkle = angles.leftAnkle;
+                emaValues.rightAnkle = angles.rightAnkle;
+              } else {
+                emaValues.leftKnee = ema(emaValues.leftKnee, angles.leftKnee);
+                emaValues.rightKnee = ema(emaValues.rightKnee, angles.rightKnee);
+                emaValues.leftHip = ema(emaValues.leftHip, angles.leftHip);
+                emaValues.rightHip = ema(emaValues.rightHip, angles.rightHip);
+                emaValues.leftAnkle = ema(emaValues.leftAnkle, angles.leftAnkle);
+                emaValues.rightAnkle = ema(emaValues.rightAnkle, angles.rightAnkle);
+              }
             }
-            emaValues.speed = ema(emaValues.speed, speed);
-            emaValues.cadence = ema(emaValues.cadence, cadence);
-            emaValues.trunk = ema(emaValues.trunk, trunkAngle);
-            emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt);
+            // trunk/pelvis/speed も最初の有効フレームは実測値で初期化して EMA のウォームアップ遅延を解消
+            if (prevTimestamp === null) {
+              emaValues.speed = speed;
+              emaValues.trunk = trunkAngle;
+              emaValues.pelvis = pelvicTilt;
+              // cadence は初回はイベントがないため 0 のまま（EMA で収束を待つ）
+              emaValues.cadence = cadence;
+            } else {
+              emaValues.speed = ema(emaValues.speed, speed);
+              // cadence EMA: cadence=0（イベント未検出）のフレームでは EMA を更新しない。
+              // 0 で更新すると検出済みの値が急速に引き下げられてしまうため、
+              // 正の値が得られた場合のみ EMA を更新する。
+              // 初回の非ゼロ値が来た時は EMA をその値で直接初期化してウォームアップ遅延を防ぐ。
+              if (cadence > 0) {
+                if (emaValues.cadence === 0) {
+                  emaValues.cadence = cadence;
+                } else {
+                  emaValues.cadence = ema(emaValues.cadence, cadence);
+                }
+              }
+              // cadence === 0 の場合: emaValues.cadence はそのまま保持
+              emaValues.trunk = ema(emaValues.trunk, trunkAngle);
+              emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt);
+            }
 
             // 対称性: 前額面はステップ対称性（歩行イベントベース）、矢状面は膝角度ベース
             const kneeSymmetry = (analysisPlane === 'sagittal' && angles)
@@ -2014,7 +2535,7 @@
             const dataPoint = buildAnalysisDataPoint({
               elapsedMs,
               analysisStartEpochMs,
-              mpTimestamp,
+              mpTimestamp: detectTimestamp,
               landmarks,
               worldLandmarks,
               angles,
@@ -2024,16 +2545,11 @@
 
             analysisData.push(dataPoint);
 
-            // Debug log every 30 frames (~1 second at 30fps)
-            if (analysisData.length % 30 === 0) {
-              console.log('[Analysis] Frame:', analysisData.length, '| Speed:', dataPoint.speed.toFixed(3), 'm/s | Trunk:', dataPoint.trunk.toFixed(2), '\u00b0 | Cadence:', dataPoint.cadence.toFixed(1), 'spm');
-            }
-
             chartController.updateCharts(dataPoint);
 
             prevLandmarks = landmarks;
             prevWorldLandmarks = worldLandmarks;
-            prevTimestamp = mpTimestamp;
+            prevTimestamp = detectTimestamp;
           }
 
           updateFPS();
@@ -2049,18 +2565,68 @@
         }
         }
 
-        // Kick
+        // Kick: register rVFC / rAF callback first, then (re-)start play().
+        // For video mode we paused the video after 'playing' so that all the
+        // setup above ran with currentTime frozen at 0.  Now we register the
+        // frame callback and immediately resume play.  Because the callback is
+        // registered *before* play(), the browser fires it on the very first
+        // decoded frame — typically within one frame interval (~33 ms) —
+        // keeping analysisVideoStartMs as small as possible.
         scheduleNext();
+        if (videoFileUrl && videoElement.paused) {
+          videoElement.play().catch((err) => {
+            // Non-fatal: the video might have been stopped by the user already.
+            console.warn('[Analysis] Kick play() failed:', err);
+          });
+        }
+
+        // ── 解析用 onended ハンドラーをここで登録 ─────────────────────────────
+        // startAnalysis() の先頭でクリアしたため、必ずここで再登録する。
+        // これにより「2回目解析開始 → 動画終了」時に確実に finalizeSession() が
+        // 呼ばれるよう保証する。
+        if (videoFileUrl && videoElement) {
+          videoElement.onended = async () => {
+            dbgLog('[onended-analysis] fired! isAnalyzing=' + isAnalyzing + ' analysisData=' + analysisData.length);
+            videoElement.onended = null;
+            if (isAnalyzing) {
+              await finalizeSession();
+              stopAllProcessing();
+              if (videoFileUrl && analysisData.length > 0) {
+                showNotification('解析完了！', 'success');
+                if (deviceMode === 'phone') {
+                  setTimeout(async () => {
+                    dbgLog('[AutoPreview] 200ms setTimeout fired (startAnalysis handler). phoneFlowView=' + phoneFlowView);
+                    try {
+                      await ensureAnalyzedPreviewReady({ notify: false });
+                      dbgLog('[AutoPreview] SUCCESS (startAnalysis handler)');
+                      showNotification('解析プレビューを表示しました。下にスクロールして確認できます。', 'success');
+                    } catch (e) {
+                      dbgLog('[AutoPreview] FAILED (startAnalysis handler): code=' + e?.code + ' msg=' + e?.message);
+                      console.warn('[AutoPreview] 自動プレビュー生成に失敗', e);
+                    }
+                  }, 200);
+                }
+              } else if (videoFileUrl && analysisData.length === 0) {
+                showNotification('解析データが取得できませんでした。動画に人物が映っているか確認してください。', 'warning');
+              }
+            }
+          };
+          dbgLog('[startAnalysis] onended registered for new analysis run');
+        }
+
         return true;
       } finally {
         isStartingAnalysis = false;
       }
     }
 
-
     function stopAllProcessing() {
+      dbgLog('[stopAllProcessing] isAnalyzing=' + isAnalyzing + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' analysisData=' + analysisData.length + ' onended=' + (videoElement.onended ? 'set' : 'null'));
       isAnalyzing = false;
-      if (analysisData.length > 0) {
+      // ビデオファイルモードで解析を実行した場合は、データ件数にかかわらず results ビューに遷移する。
+      // analysisData が 0 件（ランドマーク未検出）でも results ビューへ移動し、
+      // エラーメッセージを表示する。capture のまま残ると「解析後に最初の画面へ戻った」ように見えるバグを修正。
+      if (videoFileUrl || analysisData.length > 0) {
         phoneFlowView = 'results';
       }
       syncDeviceModeUi();
@@ -2077,10 +2643,22 @@
         videoFrameCallbackHandle
       }));
 
+      // onended ハンドラーをクリア: 解析停止後に動画の ended イベントが
+      // 遅れて発火しても finalizeSession() が二重に呼ばれないようにする。
+      // （例: 手動停止後に ended が発火 → isAnalyzing=false のため if 内は実行しないが、
+      //   onended=null にしておくことで不要なコールバックそのものを防ぐ）
+      if (videoElement) {
+        videoElement.onended = null;
+        dbgLog('[stopAllProcessing] onended cleared');
+      }
+
       // For video-file mode: always pause the video immediately when analysis stops.
       // This prevents the video from continuing to play (and being heard/seen) while
       // the rest of the stop logic runs asynchronously.
-      if (videoFileUrl && videoElement && !videoElement.paused && !videoElement.ended) {
+      // ended=true の場合も pause() を試みる（ended 状態を安定させるため）。
+      // ended 状態で pause() を呼ぶのは仕様上有効で、次の解析開始時に
+      // startVideoPlaybackForAnalysis が currentTime=0 にシークしてから play() するため問題ない。
+      if (videoFileUrl && videoElement && !videoElement.paused) {
         try { videoElement.pause(); } catch (_) { /* ignore */ }
       }
 
@@ -2091,19 +2669,31 @@
       chartController.pauseCharts();
       const postStopPlan = getPostAnalysisStopPlan({
         hasStream: !!videoElement.srcObject,
-        hasVideoSource: !!(videoFileUrl && videoElement.src),
+        // videoElement.src はブラウザの属性で一時的に空になる場合があるため
+        // videoFileUrl のみで動画ファイルモードを判定する（より堅牢）
+        hasVideoSource: !!videoFileUrl,
         isVideoPaused: videoElement.paused,
         hasAnalysisData: analysisData.length > 0
       });
 
-      if (postStopPlan.restartPreview) {
-        startCameraPreview();
-      } else if (postStopPlan.restoreVideoRecordButton) {
-        if (postStopPlan.pauseVideo) {
+      if (postStopPlan.restartPreview || postStopPlan.restoreVideoRecordButton) {
+        if (!postStopPlan.restartPreview && postStopPlan.pauseVideo) {
           videoElement.pause();
         }
-        const recordBtn = document.getElementById('btn-record');
-        setRecordButtonForVideoMode(recordBtn);
+        if (postStopPlan.restoreVideoRecordButton) {
+          const recordBtn = document.getElementById('btn-record');
+          setRecordButtonForVideoMode(recordBtn);
+        }
+        // カメラストリームがある場合のみプレビューを再起動する。
+        // ビデオファイルモード（videoFileUrl あり）では startCameraPreview() を呼ばない。
+        // 呼ぶと drawPreview ループが解析ループと並走して
+        // （1）canvasElement への二重 drawImage 競合、
+        // （2）二重 detectForVideo → ランドマーク二重描画（「2人分マーカー」）
+        // が発生する。ビデオファイルモードでは解析終了後に動画は一時停止しており
+        // プレビューループは不要。
+        if (postStopPlan.restartPreview) {
+          startCameraPreview();
+        }
       }
 
       enableAnalysisExportButtons({
@@ -2117,16 +2707,13 @@
       syncPhoneQuickActions();
     }
 
-    // Recording
     async function startRecording() {
-      console.log('[Recording] Starting...');
 
       try {
         // Start analysis if not already running
         if (!isAnalyzing) {
           const success = await startAnalysis();
           if (success === false) {
-            console.error('[Recording] Analysis failed to start');
             showNotification('分析の開始に失敗しました', 'error');
             return;
           }
@@ -2137,16 +2724,12 @@
 
         // Verify canvas has content
         if (canvasElement.width === 0 || canvasElement.height === 0) {
-          console.error('[Recording] Canvas has no size');
           showNotification('キャンバスが初期化されていません', 'error');
           return;
         }
 
-        console.log('[Recording] Canvas size:', canvasElement.width, 'x', canvasElement.height);
-
         // Capture from canvas
         const stream = canvasElement.captureStream(30);
-        console.log('[Recording] Stream captured');
 
         ({
           mimeType: recordingMimeType,
@@ -2156,7 +2739,6 @@
           MediaRecorderCtor: MediaRecorder,
           videoBitsPerSecond: 2500000
         }));
-        console.log('[Recording] MIME type:', recordingMimeType);
         recordedChunks = [];
 
         mediaRecorder.ondataavailable = (event) => {
@@ -2166,10 +2748,8 @@
         };
 
         mediaRecorder.onstop = () => {
-          console.log('Recording stopped, total chunks:', recordedChunks.length);
           // Create blob and store temporarily
           recordedVideoBlob = new Blob(recordedChunks, { type: recordingMimeType });
-          console.log('Recorded blob size:', recordedVideoBlob.size, 'bytes');
           showSaveRecordingDialog();
         };
 
@@ -2198,8 +2778,6 @@
         const recordBtn = document.getElementById('btn-record');
         setRecordButtonForActiveRecording(recordBtn);
 
-        console.log('[Recording] Started');
-
       } catch (error) {
         console.error('[Recording] Error:', error);
         showNotification('録画エラー: ' + error.message, 'error');
@@ -2208,7 +2786,6 @@
 
     function stopRecording() {
       if (mediaRecorder && isRecording) {
-        console.log('[Recording] Stopping recording...');
         mediaRecorder.stop();
         isRecording = false;
 
@@ -2234,7 +2811,6 @@
           disableRecordButton(recordBtn);
         }
 
-        console.log('[Recording] Stopped successfully');
       }
     }
 
@@ -2278,6 +2854,7 @@
     }
 
     async function renderAnalyzedVideoBlob({ showStartMessage = true, onProgress = null } = {}) {
+      dbgLog('[renderAnalyzedVideoBlob] start videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' analysisData=' + analysisData.length + ' isGenerating=' + isGeneratingAnalyzedPreview);
       if (!videoFileUrl) {
         throw createAppError('NO_VIDEO_FILE', '動画ファイルがありません');
       }
@@ -2293,282 +2870,1064 @@
 
       // ── オフスクリーン専用の video / canvas / ctx を用意 ──────────────────
       // メインの canvasElement / canvasCtx には一切触れないため、
-      // エクスポート中に画面が書き換わることはない（ユーザーには動画が
-      // 再生されて見えない）。
+      // エクスポート中に画面が書き換わることはない。
       const exportVideoElement = document.createElement('video');
       const exportCanvas = document.createElement('canvas');
       let exportCtx = null;
-
-      let endedHandler = null;
-      let videoErrorHandler = null;
       let cleanupRecorderListeners = null;
+      // iOS Safari 回避: 同一 ObjectURL の二重ロードを避けるため
+      // fetch() で Blob を再取得して別の ObjectURL を生成する。
+      // この URL はエクスポート専用で finally で revoke する。
+      let exportVideoUrl = null;
 
       try {
         if (isAnalyzing) {
           stopAllProcessing();
         }
 
+        // ── メインvideoElementを一時停止してデコーダー競合を防止 ────────────────
+        // exportVideoElement と videoElement が同じ ObjectURL を同時にデコードすると
+        // GPU/ハードウェアデコーダーのリソース競合が起き、seekTo() がタイムアウトしたり
+        // encode() が失敗する（特に2回目以降）。
+        //
+        // ⚠️ 旧実装では videoElement.src をクリアして GPU デコーダーを解放していたが、
+        // iOS/Safari では removeAttribute('src') + load() が:
+        //   1) videoElement.onended を再発火させる（仕様外動作）
+        //   2) onerror を発火させて上位の catch に伝搬する
+        //   3) 復元時の waitForVideoLoad が同一ObjectURLの二重ロードでタイムアウトする
+        // という問題を引き起こしていた。
+        //
+        // 修正: src はクリアしない。videoElement.pause() + onended=null のみで
+        // デコーダーへの新フレーム要求を停止し、exportVideoElement に専用リソースを確保する。
+        //
+        // ⚠️ 旧実装では try ブロック内で load() を呼んで emptied を待ち、
+        //    finally でも src = videoFileUrl + load() を再度呼ぶ「二重ロード」が発生していた。
+        //    iOS/Safari では同一 ObjectURL を 2 つの video 要素が同時にデコードすると
+        //    GPU デコーダー競合が起き、二重 load() で ended/onerror が予期せず発火した。
+        //
+        // 修正方針:
+        //   - try ブロックでは pause() + onended=null のみ実行（src/load() は変更しない）。
+        //   - finally ブロックでも load() は呼ばない。src は変更していないため不要。
+        //   - finally ブロックで onended ハンドラーを再登録するのみ。
+        //   これにより iOS Safari での「load() → loadedmetadata/error 発火 → 画面リセット」
+        //   問題を根本的に解消する。
+        if (videoElement) {
+          // onended ハンドラーをクリアして、export 中に ended が再発火しても問題ないようにする
+          videoElement.onended = null;
+          try { videoElement.pause(); } catch (_) {}
+          dbgLog('[renderBlob] main videoElement paused for export. src=' + (videoElement.src ? 'set' : 'empty') + ' readyState=' + videoElement.readyState);
+        }
+
+        // ── iOS Safari: 同一 ObjectURL 二重ロード問題を fetch() で完全回避 ────
+        // videoElement.src = videoFileUrl のまま exportVideoElement に同じ URL をロードすると
+        // iOS Safari では GPU デコーダー競合が起き waitForVideoLoad が 15秒タイムアウトになる。
+        // videoElement.src をクリアすると iOS Safari が load()/error イベントを発火させ
+        // loadVideoFile の catch ブロックに伝搬して画面リセットを引き起こす。
+        //
+        // 解決策: fetch() でファイルの Blob を再取得し、新しい ObjectURL を生成する。
+        // これで videoElement は一切触らず、exportVideoElement に別の URL をロードできる。
+        dbgLog('[renderBlob] creating export URL. videoFileBlob=' + (videoFileBlob ? (videoFileBlob.size + 'B type=' + videoFileBlob.type) : 'null') + ' phoneFlowView=' + phoneFlowView + ' isAnalyzing=' + isAnalyzing);
+        // iOS Safari では fetch(objectURL) がセキュリティ制限で失敗するため、
+        // 保存済みのオリジナル Blob を直接使用して新しい ObjectURL を生成する。
+        // これにより videoElement.src（=videoFileUrl）とは別の URL でエクスポートできる。
+        if (videoFileBlob) {
+          // 推奨パス: オリジナル Blob から直接 ObjectURL を生成（fetch 不要）
+          exportVideoUrl = URL.createObjectURL(videoFileBlob);
+          dbgLog('[renderBlob] export URL created from blob: OK. size=' + videoFileBlob.size + ' phoneFlowView=' + phoneFlowView);
+        } else {
+          // フォールバック: videoFileBlob がない場合は fetch を試みる（古いコードパス）
+          dbgLog('[renderBlob] videoFileBlob is null, trying fetch fallback...');
+          try {
+            const resp = await fetch(videoFileUrl);
+            if (!resp.ok) throw new Error('fetch response not ok: ' + resp.status);
+            const blob = await resp.blob();
+            exportVideoUrl = URL.createObjectURL(blob);
+            dbgLog('[renderBlob] export URL created via fetch: OK. phoneFlowView=' + phoneFlowView);
+          } catch (fetchErr) {
+            // fetch() 失敗: iOS Safari では ObjectURL の fetch が制限されることがある。
+            // 同一URLをフォールバックとして使うと二重ロードでタイムアウトするため、
+            // エラーを上位に伝えてユーザーに通知する。
+            dbgLog('[renderBlob] fetch FAILED: ' + fetchErr.message + ' — cannot export without separate URL');
+            throw createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '動画データの取得に失敗しました（' + fetchErr.message + '）。ページを再読み込みしてから再度お試しください。');
+          }
+        }
+
         exportVideoElement.playsInline = true;
         exportVideoElement.muted = true;
         exportVideoElement.preload = 'auto';
         // DOM に追加することで、ブラウザが動画の回転メタデータ（スマホ縦向き撮影など）を
-        // drawImage に対しても適用するようにする。DOM 外の video 要素では回転補正が
-        // 適用されず、videoWidth/Height が生データ（回転前）の値を返すブラウザがあるため。
-        exportVideoElement.style.cssText = 'position:fixed;visibility:hidden;width:0;height:0;pointer-events:none;';
+        // drawImage に対しても適用するようにする。
+        // NOTE: position:fixed + 小さいサイズで DOM に追加することで、iOS 等でも
+        // GPU デコードが有効になり drawImage が正しいフレームを返す。
+        exportVideoElement.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:4px;height:4px;opacity:0.01;pointer-events:none;';
         document.body.appendChild(exportVideoElement);
 
+        dbgLog('[renderBlob] waitForVideoLoad START. phoneFlowView=' + phoneFlowView);
         await waitForVideoLoad({
           videoElement: exportVideoElement,
-          src: videoFileUrl,
+          src: exportVideoUrl,
           timeoutMs: 15000,
           logger: console
         });
+        dbgLog('[renderBlob] waitForVideoLoad DONE. readyState=' + exportVideoElement.readyState + ' dim=' + exportVideoElement.videoWidth + 'x' + exportVideoElement.videoHeight + ' dur=' + exportVideoElement.duration?.toFixed(2) + ' networkState=' + exportVideoElement.networkState + ' phoneFlowView=' + phoneFlowView);
 
-        // オフスクリーン canvas のサイズを動画に合わせる。
-        // ランドマーク座標は解析時の videoElement.videoWidth/Height で正規化されているため、
-        // exportVideoElement が異なるサイズを返す場合に備え、解析時の寸法を優先使用する。
-        // （同一ファイルでも DOM内要素と動的生成要素でデコーダが異なり、異なる寸法が返ることがある）
-        // DOM追加後の videoWidth/videoHeight が analysisVideoWidth/Height と一致するか確認する。
+        // ── iOS Safari MOV シーク問題の根本解決: バッファリング完了待機 ──────────────
+        // networkState=2 (NETWORK_LOADING) の状態でシークすると「seeked」イベントが
+        // 5秒以内に来ない → seekTo がタイムアウトし、drawImage が黒フレームを返す。
+        // これは iOS Safari の MOV (QuickTime) ファイルで特に顕著:
+        //   - moov atom が末尾にある場合、ファイル全体をダウンロードするまでシーク不可
+        //   - ObjectURL (blob:) でも同様の問題が発生する（ローカルでもストリーミング扱い）
+        //
+        // 解決策: シーク開始前に動画を 1× 速で全区間再生し、バッファを埋める。
+        // 動画の実時間分待つが、解析動画（~6秒）なら許容範囲。
+        // networkState が 1 (NETWORK_IDLE) になれば全データがバッファ済み。
+        //
+        // ⚠️ play() を使うため muted=true が必須（autoplay policy 回避）。
+        await (async () => {
+          const dur = exportVideoElement.duration;
+          if (!isFinite(dur) || dur <= 0) return; // duration 不明なら skip
+
+          // すでにバッファ済みか確認（buffered.end(0) >= duration - 0.1）
+          const isFullyBuffered = () => {
+            const buf = exportVideoElement.buffered;
+            if (!buf || buf.length === 0) return false;
+            // 最後のバッファ区間の終端が duration に近ければ OK
+            return buf.end(buf.length - 1) >= dur - 0.1;
+          };
+
+          if (isFullyBuffered()) {
+            dbgLog('[renderBlob] already fully buffered. skip play-through.');
+            return;
+          }
+
+          dbgLog('[renderBlob] NOT fully buffered (networkState=' + exportVideoElement.networkState + ') — playing through to buffer video before seek...');
+          // ユーザーに進捗を通知（MOVファイルのバッファリングに数秒かかる）
+          showNotification('動画をバッファリング中… (約' + Math.ceil(dur) + '秒)', 'info');
+
+          // 先頭にシークしてから play() でバッファリング
+          exportVideoElement.currentTime = 0;
+          const BUFFER_TIMEOUT_MS = Math.max(60000, Math.ceil(dur) * 1000 * 3); // 実時間の3倍
+          let bufferDone = false;
+
+          await new Promise((resolve) => {
+            let playThroughTimer = null;
+            let pollTimer = null;
+
+            const finish = (reason) => {
+              if (bufferDone) return;
+              bufferDone = true;
+              clearTimeout(playThroughTimer);
+              clearInterval(pollTimer);
+              exportVideoElement.pause();
+              // ⚠️ currentTime = 0 をここで設定しない！
+              // iOS Safari は currentTime = 0 で再びバッファをクリアし networkState=2 に戻る。
+              // seekTo() が最初のフレームを要求する際に currentTime を設定するため不要。
+              dbgLog('[renderBlob] buffer play-through done: ' + reason + ' buffered=' + (exportVideoElement.buffered.length ? exportVideoElement.buffered.end(exportVideoElement.buffered.length - 1).toFixed(2) : 'n/a') + '/' + dur.toFixed(2) + ' currentTime=' + exportVideoElement.currentTime.toFixed(2));
+              resolve();
+            };
+
+            // タイムアウト: バッファリングが終わらなくても続行
+            playThroughTimer = setTimeout(() => {
+              dbgLog('[renderBlob] buffer play-through TIMEOUT (' + (BUFFER_TIMEOUT_MS/1000).toFixed(0) + 's)');
+              finish('timeout');
+            }, BUFFER_TIMEOUT_MS);
+
+            // ポーリング: バッファ完了チェック
+            pollTimer = setInterval(() => {
+              if (isFullyBuffered()) {
+                finish('buffered');
+              }
+            }, 500);
+
+            // ended イベントでも完了とみなす
+            exportVideoElement.addEventListener('ended', () => finish('ended'), { once: true });
+
+            // play() 開始
+            const playPromise = exportVideoElement.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+              playPromise.catch((err) => {
+                dbgLog('[renderBlob] buffer play() failed: ' + err.message + ' — proceeding anyway');
+                finish('play-failed');
+              });
+            }
+          });
+        })();
+
+        // オフスクリーン canvas のサイズを解析時寸法に合わせる。
+        // ⚠️ iOS Safari メモリ制限対策: 解像度が大きすぎると createImageBitmap/VideoFrame で
+        //    OOM クラッシュが発生しタブが落ちる。最大 1280px に制限する。
+        //    2940×1846 (2.4K) を 1280px にスケールすると 1280×803 になり、
+        //    メモリ使用量は 21MB→4MB に削減される。
+        const MAX_EXPORT_EDGE = 1280; // iOS Safari OOM 対策上限
         const exportVideoW = exportVideoElement.videoWidth;
         const exportVideoH = exportVideoElement.videoHeight;
-        const exportW = (analysisVideoWidth  > 0 ? analysisVideoWidth  : exportVideoW)  || canvasElement.width;
-        const exportH = (analysisVideoHeight > 0 ? analysisVideoHeight : exportVideoH) || canvasElement.height;
+        const rawExportW = (analysisVideoWidth  > 0 ? analysisVideoWidth  : exportVideoW)  || canvasElement.width;
+        const rawExportH = (analysisVideoHeight > 0 ? analysisVideoHeight : exportVideoH) || canvasElement.height;
+        const exportScale = Math.min(1, MAX_EXPORT_EDGE / Math.max(rawExportW, rawExportH, 1));
+        const exportW = Math.round(rawExportW * exportScale);
+        const exportH = Math.round(rawExportH * exportScale);
+        if (exportScale < 1) {
+          dbgLog('[renderBlob] canvas scaled for iOS: ' + rawExportW + 'x' + rawExportH + ' → ' + exportW + 'x' + exportH + ' (scale=' + exportScale.toFixed(3) + ')');
+        }
         exportCanvas.width  = exportW;
         exportCanvas.height = exportH;
         exportCtx = exportCanvas.getContext('2d');
 
-        const exportFps = estimateExportFrameRate(exportVideoElement);
-        const exportBitrate = estimateExportVideoBitrate({
-          width: exportCanvas.width,
-          height: exportCanvas.height,
-          fps: exportFps
-        });
-        console.log('[Export] fps:', exportFps, '| bitrate:', exportBitrate,
-          '| exportCanvasSize:', exportCanvas.width, 'x', exportCanvas.height,
-          '| exportVideoSize:', exportVideoW, 'x', exportVideoH,
-          '| analysisVideoSize:', analysisVideoWidth, 'x', analysisVideoHeight,
-          '| analysisCanvasSize:', canvasElement.width, 'x', canvasElement.height,
-          '| analysisVideoStartMs:', analysisVideoStartMs.toFixed(1),
-          '| dimensionMismatch:', (exportVideoW !== analysisVideoWidth || exportVideoH !== analysisVideoHeight) ? 'YES ⚠' : 'no');
+        // ── Seek-driven エクスポート（WebCodecs VideoEncoder 優先 / MediaRecorder フォールバック）
+        //
+        // ■ 根本問題（v12〜v14 で未解決）:
+        //   captureStream(0) + requestFrame() では、MediaRecorder のフレームタイムスタンプが
+        //   requestFrame() を呼んだ「実時刻 (performance.now())」に基づくため：
+        //   ・矢状面（~2.4fps, フレーム間隔~420ms）: seek に ~500ms 要すると
+        //     deadline が過ぎてしまい requestFrame() が seek 完了直後に呼ばれる
+        //     → 実間隔 ≈ 500ms > 正しい 420ms → スローモーション
+        //   ・前額面（~30fps, フレーム間隔~33ms）: seek が速い(~10ms)ので
+        //     wait が効いて正常に見えるが、seek がぶれると乱れる
+        //
+        // ■ 解決策 A（優先）: WebCodecs VideoEncoder + mp4-muxer
+        //   各フレームに elapsedMs[i] * 1000 μs を PTS として直接指定。
+        //   seek 時間に完全に依存しない → 常に正確な再生速度。
+        //   Chrome 94+, Firefox 130+, Safari 16.4+ で対応。
+        //
+        // ■ 解決策 B（フォールバック）: captureStream(fps) + play() 方式
+        //   WebCodecs 未対応環境向け。
+        //   captureStream(fps) で fps を正確に指定し、play() で動画を再生しながら
+        //   rVFC/rAF で canvas 更新 → seek-driven よりも低品質だが互換性が高い。
 
-        // ── オフスクリーン canvas から MediaRecorder でキャプチャ ────────────
-        const stream = exportCanvas.captureStream(exportFps);
-        const chunks = [];
-        const { mimeType, recorder } = createCanvasRecordingSession({
-          stream,
-          MediaRecorderCtor: MediaRecorder,
-          videoBitsPerSecond: exportBitrate
-        });
+        const analysisFrameCount = analysisData.length;
+        const firstElapsedMs = analysisData[0]?.elapsedMs ?? 0;
+        const lastElapsedMs  = analysisData[analysisFrameCount - 1]?.elapsedMs ?? 0;
+        const analysisDurationMs = lastElapsedMs - firstElapsedMs;
+        // 解析の実測fps（フレーム間隔の中央値から算出）
+        const estimatedFps = (analysisFrameCount >= 2 && analysisDurationMs > 0)
+          ? (analysisFrameCount / (analysisDurationMs / 1000))
+          : 5;
 
-        let exportActive  = false;
-        let exportFinished = false;
-        let exportFrameHandle = null;
+        // 解析ループの共通変数
+        const expW  = exportCanvas.width;
+        const expH  = exportCanvas.height;
+        // expVW/expVH: drawImage と drawEnhancedLandmarks で使う「動画の仮想解像度」
+        // exportVideoElement.videoWidth/Height を最優先にして実際の描画サイズと一致させる。
+        // analysisVideoWidth/Height は解析時に記録した値で、exportVideoElement と同じはずだが
+        // iOS Safari の4px CSSサイズ問題回避のため exportVideoElement の実値を優先する。
+        const expVW = (exportVideoElement.videoWidth  > 0 ? exportVideoElement.videoWidth  : analysisVideoWidth)  || expW;
+        const expVH = (exportVideoElement.videoHeight > 0 ? exportVideoElement.videoHeight : analysisVideoHeight) || expH;
+        const expRect = calcVideoDrawRect(expW, expH, expVW, expVH);
+        // aRect: 解析時キャンバスの動画描画矩形（ランドマーク変換に使用）
+        const _aRectDbg = calcVideoDrawRect(
+          analysisCanvasWidth  || expW,
+          analysisCanvasHeight || expH,
+          expVW, expVH
+        );
+        dbgLog('[renderBlob] drawFrame setup: expW=' + expW + ' expH=' + expH + ' expVW=' + expVW + ' expVH=' + expVH + ' expRect={x:' + expRect.x.toFixed(2) + ',y:' + expRect.y.toFixed(2) + ',w:' + expRect.w.toFixed(2) + ',h:' + expRect.h.toFixed(2) + '} analysisCanvas=' + analysisCanvasWidth + 'x' + analysisCanvasHeight + ' aRect={x:' + _aRectDbg.x.toFixed(2) + ',y:' + _aRectDbg.y.toFixed(2) + ',w:' + _aRectDbg.w.toFixed(2) + ',h:' + _aRectDbg.h.toFixed(2) + '}');
 
-        const cancelExportLoop = () => {
-          if (exportFrameHandle) {
-            if (exportVideoElement.cancelVideoFrameCallback) {
-              try { exportVideoElement.cancelVideoFrameCallback(exportFrameHandle); } catch (_) {}
-            } else {
-              cancelAnimationFrame(exportFrameHandle);
+        /**
+         * 指定した時刻へシークし、seeked イベント後に resolve する。
+         * すでにその時刻にいる場合は即 resolve。
+         * タイムアウト（5秒）した場合も処理を継続する。
+         */
+        const seekTo = (targetTimeSec) => new Promise((resolve) => {
+          // iOS Safari (MOV/blob:) では seeked イベントが発火しないことがある。
+          // 対策:
+          //   1) alreadyThere: 既にその時刻にいれば即 resolve
+          //   2) seeked イベントで resolve
+          //   3) timeupdate イベントで currentTime が近ければ即 resolve
+          //   4) 200ms ごとのポーリングで currentTime が近ければ resolve
+          //   5) 5秒タイムアウトで継続（drawImage は readyState=4 なら有効）
+          const PER_SEEK_TIMEOUT_MS = 5000;
+          const NEAR_THRESHOLD = 0.05; // 50ms 以内なら「到達済み」
+          const alreadyThere = !exportVideoElement.seeking
+            && Math.abs(exportVideoElement.currentTime - targetTimeSec) < NEAR_THRESHOLD
+            && exportVideoElement.readyState >= 2;
+          if (alreadyThere) { resolve(); return; }
+
+          let done = false;
+          let seekTimer = null;
+          let pollTimer = null;
+
+          const finish = () => {
+            if (done) return;
+            done = true;
+            clearTimeout(seekTimer);
+            clearInterval(pollTimer);
+            exportVideoElement.removeEventListener('seeked', onSeeked);
+            exportVideoElement.removeEventListener('timeupdate', onTimeUpdate);
+            resolve();
+          };
+
+          const onSeeked = () => { finish(); };
+          const onTimeUpdate = () => {
+            // timeupdate: currentTime が目標に近づいていれば resolve
+            if (Math.abs(exportVideoElement.currentTime - targetTimeSec) < NEAR_THRESHOLD) {
+              finish();
             }
-            exportFrameHandle = null;
-          }
-        };
+          };
 
-        // ── フレーム描画ループ ────────────────────────────────────────────────
-        // requestVideoFrameCallback が使える環境では動画フレームに完全同期する。
-        // 使えない環境では requestAnimationFrame でポーリングするが、
-        // currentTime が変わっていないフレームは描画をスキップして重複描画を防ぐ。
-        let lastRenderedTime = -1; // rAF フォールバック用: 前回描画した currentTime
-        const renderExportFrame = () => {
-          if (!exportActive) return;
-          if (exportVideoElement.ended) return;
+          exportVideoElement.addEventListener('seeked', onSeeked, { once: true });
+          exportVideoElement.addEventListener('timeupdate', onTimeUpdate);
 
-          // rAF フォールバック時: 動画フレームが更新されていなければスキップ
-          // （requestVideoFrameCallback はフレーム更新時のみ呼ばれるので不要）
-          const currentVideoTime = exportVideoElement.currentTime;
-          if (!exportVideoElement.requestVideoFrameCallback && currentVideoTime === lastRenderedTime && !exportVideoElement.paused) {
-            exportFrameHandle = requestAnimationFrame(renderExportFrame);
-            return;
-          }
+          // ポーリング: seeked/timeupdate が来ない場合でも 200ms ごとにチェック
+          pollTimer = setInterval(() => {
+            if (!exportVideoElement.seeking
+                && Math.abs(exportVideoElement.currentTime - targetTimeSec) < NEAR_THRESHOLD
+                && exportVideoElement.readyState >= 2) {
+              dbgLog('[seekTo] poll resolved at ' + targetTimeSec.toFixed(3) + 's');
+              finish();
+            }
+          }, 200);
 
-          const elapsedMs = getSafeVideoElapsedMs(exportVideoElement);
-          const dataPoint = findInterpolatedAnalysisPoint(analysisData, elapsedMs);
-          // NOTE: renderAnalysisFrameFromData は呼ばない。
-          // あの関数はメインの canvasCtx に描くため、エクスポート中に画面が更新されてしまう。
-          // オフスクリーン exportCtx への描画は以下で直接行う。
+          seekTimer = setTimeout(() => {
+            dbgLog('[seekTo] TIMEOUT at ' + targetTimeSec.toFixed(3) + 's readyState=' + exportVideoElement.readyState + ' networkState=' + exportVideoElement.networkState + ' currentTime=' + exportVideoElement.currentTime.toFixed(3) + ' err=' + exportVideoElement.error?.code);
+            console.warn('[Export] per-seek timeout at', targetTimeSec.toFixed(3), 's — continuing');
+            finish();
+          }, PER_SEEK_TIMEOUT_MS);
 
-          // ── 進捗コールバックを呼ぶ ─────────────────────────────────────────
-          if (onProgress && Number.isFinite(exportVideoElement.duration) && exportVideoElement.duration > 0) {
-            const pct = Math.min(99, (currentVideoTime / exportVideoElement.duration) * 100);
-            onProgress(pct);
-          }
+          exportVideoElement.currentTime = targetTimeSec;
+        });
 
-          // ── オフスクリーン ctx へ描画（メイン canvas は汚さない） ───────────
-          const expW = exportCanvas.width;
-          const expH = exportCanvas.height;
-          const expVW = exportVideoElement.videoWidth || analysisVideoWidth;
-          const expVH = exportVideoElement.videoHeight || analysisVideoHeight;
-          const expRect = calcVideoDrawRect(expW, expH, expVW, expVH);
-
+        // 描画関数（seek後のcanvas描画）
+        //
+        // 【ランドマーク座標変換の根本設計】
+        // MediaPipe のランドマーク正規化座標 lm.x/y (0〜1) は、
+        // 解析時に detectForVideo に渡した「canvasElement 全体」を基準とする座標系。
+        //   例) analysisCanvasW=750, analysisCanvasH=500, videoAR=1.593
+        //       → calcVideoDrawRect(750,500,2940,1846) = {x:0, y:14.6, w:750, h:470.8}
+        //       → lm.y=0.9 は canvas座標 y=0.9*500=450px、
+        //          動画内の相対y = (450-14.6)/470.8 = 0.925
+        //
+        // エクスポートキャンバス(expW×expH)でも解析時と同じ黒帯比率を再現するには、
+        // expCanvasのARを analysisCanvasW/H と同じにする必要がある。
+        // それが困難な場合は、lm座標をキャンバス→動画→エクスポートキャンバスと
+        // 2段階変換して正確なピクセル位置に描画する。
+        //
+        // 【変換式】
+        //   解析時キャンバス座標: cx = lm.x * acW, cy = lm.y * acH
+        //   解析時動画描画矩形:   aRect = calcVideoDrawRect(acW, acH, dvW, dvH)
+        //   動画内の正規化座標:   vx = (cx - aRect.x) / aRect.w, vy = (cy - aRect.y) / aRect.h
+        //   エクスポートキャンバス座標: ex = vx * expW, ey = vy * expH
+        //   (エクスポートは動画をキャンバス全体にfitさせる: drawImage(video,0,0,dvW,dvH,0,0,expW,expH))
+        //
+        // この変換により解析キャンバスのAR・黒帯量に関わらず正確に描画できる。
+        const drawFrame = (dataPoint) => {
           exportCtx.clearRect(0, 0, expW, expH);
-          exportCtx.drawImage(exportVideoElement, expRect.x, expRect.y, expRect.w, expRect.h);
-          lastRenderedTime = currentVideoTime;
+
+          const dvW = exportVideoElement.videoWidth  || expVW;
+          const dvH = exportVideoElement.videoHeight || expVH;
+
+          // 動画をキャンバス全体に引き伸ばして描画（AR保持: dvW/dvH と expW/expH は同比率）
+          // expCanvasは rawExportW=dvW, rawExportH=dvH のスケールダウンなので歪みなし
+          exportCtx.drawImage(exportVideoElement, 0, 0, dvW, dvH, 0, 0, expW, expH);
 
           if (dataPoint?.landmarks?.length) {
+            // 解析時キャンバスの黒帯を考慮した座標変換
+            const acW = analysisCanvasWidth  || expW;
+            const acH = analysisCanvasHeight || expH;
+            // aRect は「解析時キャンバス」と「解析時動画」の関係を再現する必要がある。
+            // exportVideoElement.videoWidth は動画の回転メタデータ処理により
+            // 解析時の videoElement.videoWidth と異なる可能性があるため、
+            // aRect 計算には解析時に記録した analysisVideoWidth/Height を優先使用する。
+            const aVW = analysisVideoWidth  || dvW;
+            const aVH = analysisVideoHeight || dvH;
+            const aRect = calcVideoDrawRect(acW, acH, aVW, aVH);
+
+            // lm座標(0〜1) → 解析キャンバス座標 → 動画内正規化座標 → エクスポートキャンバス座標
+            // drawEnhancedLandmarks をそのまま使う代わりに、変換済み座標で直接描画するため
+            // ここではカスタムの変換を適用した仮想キャンバスのスケールを渡す。
+            //
+            // 変換を適用すると ctx に transform をかければよいが、
+            // drawEnhancedLandmarks の内部でも calcVideoDrawRect を呼ぶため
+            // 「変換済みの rect を直接渡す」アプローチが最もシンプル。
+            //
+            // drawEnhancedLandmarks(ctx, canvasW, canvasH, videoW, videoH) 内部:
+            //   rect = calcVideoDrawRect(canvasW, canvasH, videoW, videoH)
+            //   lm_x = rect.x + lm.x * rect.w
+            //   lm_y = rect.y + lm.y * rect.h
+            //
+            // 目標:
+            //   lm_x = (lm.x * acW - aRect.x) / aRect.w * expW
+            //   lm_y = (lm.y * acH - aRect.y) / aRect.h * expH
+            //
+            // これは calcVideoDrawRect が返す rect を以下に設定することと等価:
+            //   rect.x = -aRect.x / aRect.w * expW
+            //   rect.y = -aRect.y / aRect.h * expH
+            //   rect.w = acW / aRect.w * expW
+            //   rect.h = acH / aRect.h * expH
+            //
+            // このような rect は calcVideoDrawRect では生成できないため、
+            // ctx に affine transform を適用してから drawEnhancedLandmarks(fullCanvas) を呼ぶ。
+            const scaleX = expW / aRect.w;
+            const scaleY = expH / aRect.h;
+            const transX = -aRect.x * scaleX;
+            const transY = -aRect.y * scaleY;
+
+            exportCtx.save();
+            exportCtx.translate(transX, transY);
+            exportCtx.scale(scaleX, scaleY);
+            // transform適用後にcanvasW=acW, canvasH=acH, videoW=0(=fullCanvas)で描画
             drawEnhancedLandmarks(
               dataPoint.landmarks,
               dataPoint.worldLandmarks || null,
               false,
               exportCtx,
-              expW,
-              expH,
-              expVW,
-              expVH
+              acW,
+              acH,
+              0,   // videoW=0 → rect={x:0,y:0,w:acW,h:acH} → lm_x=lm.x*acW
+              0    // videoH=0
             );
-          }
-
-          if (exportVideoElement.paused) {
-            // バッファ待ち: rAF でポーリングして再開を待つ
-            exportFrameHandle = requestAnimationFrame(renderExportFrame);
-            return;
-          }
-
-          // 次フレームをスケジュール
-          if (exportVideoElement.requestVideoFrameCallback) {
-            exportFrameHandle = exportVideoElement.requestVideoFrameCallback(renderExportFrame);
-          } else {
-            exportFrameHandle = requestAnimationFrame(renderExportFrame);
+            exportCtx.restore();
           }
         };
 
-        const finishExport = async () => {
-          if (exportFinished) return;
-          exportFinished = true;
-          exportActive = false;
-          cancelExportLoop();
-          if (recorder.state !== 'inactive') {
-            recorder.stop();
-          }
-          exportVideoElement.pause();
-          const restorePoint = findInterpolatedAnalysisPoint(analysisData, getSafeVideoElapsedMs(videoElement));
-          renderAnalysisFrameFromData(restorePoint, videoElement);
-        };
+        // タイムアウト: seek処理の最大待機時間（フレーム数×6s + 30s、最低120s）
+        // seekTo のタイムアウトが 5s なので、フレームごとに最悪 5s かかる想定。
+        // createImageBitmap と encode に約 1s の余裕を加算。
+        const exportTotalMs = Math.max(120000, analysisFrameCount * 6000 + 30000);
+        console.log('[Export] estimatedFps:', estimatedFps.toFixed(2),
+          '| frameCount:', analysisFrameCount,
+          '| analysisDurationMs:', analysisDurationMs.toFixed(0),
+          '| exportTotalMs:', exportTotalMs,
+          '| analysisVideoStartMs:', analysisVideoStartMs.toFixed(1),
+          '| firstElapsedMs:', firstElapsedMs.toFixed(0),
+          '| lastElapsedMs:', lastElapsedMs.toFixed(0),
+          '| firstTargetSec:', ((analysisVideoStartMs + firstElapsedMs) / 1000).toFixed(3),
+          '| lastTargetSec:', ((analysisVideoStartMs + lastElapsedMs) / 1000).toFixed(3),
+          '| videoDuration:', exportVideoElement.duration,
+          '| WebCodecs:', typeof VideoEncoder !== 'undefined');
 
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) chunks.push(e.data);
-        };
+        // ── WebCodecs パス（PTS直接指定で正確な再生速度）──────────────────────
+        const hasWebCodecs = typeof VideoEncoder !== 'undefined'
+          && typeof VideoFrame !== 'undefined';
 
-        const recorderStopPromise = new Promise((resolve, reject) => {
-          const onStop  = () => { cleanupRecorderListeners?.(); resolve(); };
-          const onError = () => { cleanupRecorderListeners?.(); reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。')); };
-          cleanupRecorderListeners = () => {
-            recorder.removeEventListener('stop',  onStop);
-            recorder.removeEventListener('error', onError);
+        let exportBlob = null;
+        let exportMimeType = null;
+
+        if (hasWebCodecs) {
+          // ── WebCodecs VideoEncoder（PTS直接指定でスローモーション防止）─────────
+          // 【設計方針】
+          //   1) コーデック選択フェーズ: isConfigSupported のみ（エンコードなし）
+          //   2) エンコードループは選択したコーデックで1回だけ実行
+          //      → 99%で戻る現象（複数回のシークループ）を根本的に排除
+          //
+          // 【優先順位】
+          //   A: AVC (H.264/AVCC形式) + mp4-muxer → .mp4  ← Desktop Chrome/Firefox/Edge
+          //   B: AVC (H.264/Annex-B形式) + mp4-muxer → .mp4  ← Safari/iOS
+          //   C: VP9 + webm-muxer → .webm  ← AVC非対応環境（colorSpace問題を回避）
+          //   D: VP8 + webm-muxer → .webm  ← 最終WebCodecsフォールバック
+          //
+          // 【VP9+mp4-muxerを使わない理由】
+          //   mp4-muxer@5.2.2 は VP9 の decoderConfig に colorSpace が必須。
+          //   WebCodecs が VP9 で返す colorSpace は実装依存で不定なため、
+          //   addVideoChunk 時に "colorSpace is required" エラーが発生しやすい。
+          //   webm-muxer は _fixVP9ColorSpace() で自動補正するため安全。
+          //
+          // 【タイムスケール設計】
+          //   mp4-muxer: frameRate 省略 → timescale=57600 = μs精度のPTS保持
+          //   VideoFrame.timestamp = elapsedMs * 1000 μs → seek時間に完全非依存
+
+          // ── muxer ローダー ────────────────────────────────────────────────────
+          const loadMp4Muxer = async () => {
+            if (typeof window.Mp4Muxer !== 'undefined' && typeof window.Mp4Muxer.Muxer !== 'undefined') {
+              return window.Mp4Muxer;
+            }
+            await new Promise((resolve, reject) => {
+              const s = document.createElement('script');
+              s.src = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js';
+              s.onload = resolve;
+              s.onerror = reject;
+              document.head.appendChild(s);
+            });
+            if (typeof window.Mp4Muxer === 'undefined' || typeof window.Mp4Muxer.Muxer === 'undefined') {
+              throw new Error('mp4-muxer load failed');
+            }
+            return window.Mp4Muxer;
           };
-          recorder.addEventListener('stop',  onStop);
-          recorder.addEventListener('error', onError);
-        });
 
-        endedHandler = async () => {
-          try { await finishExport(); }
-          catch (e) { console.warn('[Export] finishExport on ended failed:', e); }
-          finally   { exportVideoElement.removeEventListener('ended', endedHandler); }
-        };
-        exportVideoElement.addEventListener('ended', endedHandler);
+          const loadWebMMuxer = async () => {
+            if (typeof window.WebMMuxer !== 'undefined' && typeof window.WebMMuxer.Muxer !== 'undefined') {
+              return window.WebMMuxer;
+            }
+            await new Promise((resolve, reject) => {
+              const s = document.createElement('script');
+              s.src = 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.3/build/webm-muxer.js';
+              s.onload = resolve;
+              s.onerror = reject;
+              document.head.appendChild(s);
+            });
+            if (typeof window.WebMMuxer === 'undefined' || typeof window.WebMMuxer.Muxer === 'undefined') {
+              throw new Error('webm-muxer load failed');
+            }
+            return window.WebMMuxer;
+          };
 
-        const videoErrorPromise = new Promise((_, reject) => {
-          videoErrorHandler = () => reject(createAppError('ANALYZED_VIDEO_EXPORT_VIDEO_ERROR', '動画の再生中にエラーが発生しました。'));
-          exportVideoElement.addEventListener('error', videoErrorHandler, { once: true });
-        });
+          // ── エンコーダー設定 ──────────────────────────────────────────────────
+          // AVC H.264 の制約: 幅・高さは 2 の倍数でなければならない
+          const encW = expW % 2 === 0 ? expW : expW - 1;
+          const encH = expH % 2 === 0 ? expH : expH - 1;
 
-        // ── 録画開始 ──────────────────────────────────────────────────────────
-        exportVideoElement.currentTime = 0;
-        // 初回フレームをオフスクリーン exportCtx に描画してから recorder を start。
-        // renderAnalysisFrameFromData はメインの canvasCtx に描くため使わない。
-        {
-          const firstDataPoint = findInterpolatedAnalysisPoint(analysisData, 0);
-          const expW0 = exportCanvas.width;
-          const expH0 = exportCanvas.height;
-          const expVW0 = exportVideoElement.videoWidth || analysisVideoWidth;
-          const expVH0 = exportVideoElement.videoHeight || analysisVideoHeight;
-          const expRect0 = calcVideoDrawRect(expW0, expH0, expVW0, expVH0);
-          exportCtx.clearRect(0, 0, expW0, expH0);
-          exportCtx.drawImage(exportVideoElement, expRect0.x, expRect0.y, expRect0.w, expRect0.h);
-          if (firstDataPoint?.landmarks?.length) {
-            drawEnhancedLandmarks(
-              firstDataPoint.landmarks,
-              firstDataPoint.worldLandmarks || null,
-              false,
-              exportCtx,
-              expW0,
-              expH0,
-              expVW0,
-              expVH0
-            );
+          // VideoEncoder framerate: 最低 10fps にクランプ（低fps動画でAVC/VP9が拒否しないように）
+          // 再生速度は VideoFrame.timestamp (elapsedMs*1000 μs) で決まるため
+          // framerate をクランプしても出力の速度には影響しない。
+          const wcClampedFps = Math.max(10, estimatedFps);
+
+          const wcBitrate = estimateExportVideoBitrate({
+            width: encW, height: encH,
+            fps: Math.round(Math.min(30, Math.max(5, estimatedFps)))
+          });
+          // キーフレーム間隔: 約 2 秒ごと（最低 1）
+          const wcKeyFrameInterval = Math.max(1, Math.round(wcClampedFps * 2));
+
+          // ── フェーズ1: コーデック選択（isConfigSupported のみ、エンコードなし）──
+          // ここでは seek ループを一切実行しない。
+          // サポートされるコーデックを事前に確定してから、エンコードループを1回だけ実行する。
+
+          const avcAvccHighCfg = { codec: 'avc1.640034', width: encW, height: encH,
+            bitrate: wcBitrate, framerate: wcClampedFps, avc: { format: 'avc' } };
+          const avcAvccBaseCfg = { codec: 'avc1.42E01E', width: encW, height: encH,
+            bitrate: wcBitrate, framerate: wcClampedFps, avc: { format: 'avc' } };
+          const avcAnnexBHighCfg = { codec: 'avc1.640034', width: encW, height: encH,
+            bitrate: wcBitrate, framerate: wcClampedFps, avc: { format: 'annexb' } };
+          const avcAnnexBBaseCfg = { codec: 'avc1.42E01E', width: encW, height: encH,
+            bitrate: wcBitrate, framerate: wcClampedFps, avc: { format: 'annexb' } };
+          const vp9Cfg = { codec: 'vp09.00.10.08', width: encW, height: encH,
+            bitrate: wcBitrate, framerate: wcClampedFps };
+          const vp8Cfg = { codec: 'vp8', width: encW, height: encH,
+            bitrate: wcBitrate, framerate: wcClampedFps };
+
+          // 選択結果: { type: 'avc-avcc'|'avc-annexb'|'vp9'|'vp8', config }
+          let selectedCodec = null;
+
+          // コーデック選択キャッシュキー（解像度・ビットレート・fpsが同じなら同じキーになる）
+          const codecCacheKey = `${encW}x${encH}@${wcClampedFps.toFixed(0)}/${wcBitrate}`;
+
+          // キャッシュが有効かつ同じパラメーターなら再利用（2回目以降の高速化）
+          if (_wcCodecCache && _wcCodecCache.key === codecCacheKey) {
+            console.log('[Export codec-select] using cached codec:', _wcCodecCache.type,
+              '(key:', codecCacheKey, ')');
+            // キャッシュされたtypeに応じてconfigを再構築（bitrate/fps等が同じため安全）
+            const cfgMap = {
+              'avc-avcc-high': avcAvccHighCfg, 'avc-avcc-base': avcAvccBaseCfg,
+              'avc-annexb-high': avcAnnexBHighCfg, 'avc-annexb-base': avcAnnexBBaseCfg,
+              'vp9': vp9Cfg, 'vp8': vp8Cfg
+            };
+            const cachedCfg = cfgMap[_wcCodecCache.type];
+            if (cachedCfg) {
+              // typeを正規化（avc-avcc-high/avc-avcc-baseはどちらもavc-avcc）
+              const normalType = _wcCodecCache.type.startsWith('avc-avcc') ? 'avc-avcc'
+                : _wcCodecCache.type.startsWith('avc-annexb') ? 'avc-annexb'
+                : _wcCodecCache.type;
+              selectedCodec = { type: normalType, config: cachedCfg };
+            }
           }
+
+          if (!selectedCodec) {
+            const checkSupport = async (cfg, label) => {
+              try {
+                const sup = await VideoEncoder.isConfigSupported(cfg);
+                console.log('[Export codec-select]', label, '→', sup.supported);
+                return sup.supported;
+              } catch (e) {
+                console.warn('[Export codec-select]', label, 'error:', e.message ?? e);
+                return false;
+              }
+            };
+
+            // AVC AVCC (Desktop Chrome/Firefox/Edge)
+            if (!selectedCodec && await checkSupport(avcAvccHighCfg, 'AVC-AVCC-High')) {
+              selectedCodec = { type: 'avc-avcc', config: avcAvccHighCfg };
+              _wcCodecCache = { key: codecCacheKey, type: 'avc-avcc-high' };
+            }
+            if (!selectedCodec && await checkSupport(avcAvccBaseCfg, 'AVC-AVCC-Base')) {
+              selectedCodec = { type: 'avc-avcc', config: avcAvccBaseCfg };
+              _wcCodecCache = { key: codecCacheKey, type: 'avc-avcc-base' };
+            }
+            // AVC Annex-B (Safari/iOS)
+            if (!selectedCodec && await checkSupport(avcAnnexBHighCfg, 'AVC-AnnexB-High')) {
+              selectedCodec = { type: 'avc-annexb', config: avcAnnexBHighCfg };
+              _wcCodecCache = { key: codecCacheKey, type: 'avc-annexb-high' };
+            }
+            if (!selectedCodec && await checkSupport(avcAnnexBBaseCfg, 'AVC-AnnexB-Base')) {
+              selectedCodec = { type: 'avc-annexb', config: avcAnnexBBaseCfg };
+              _wcCodecCache = { key: codecCacheKey, type: 'avc-annexb-base' };
+            }
+            // VP9 + webm-muxer (AVC非対応)
+            if (!selectedCodec && await checkSupport(vp9Cfg, 'VP9-WebM')) {
+              selectedCodec = { type: 'vp9', config: vp9Cfg };
+              _wcCodecCache = { key: codecCacheKey, type: 'vp9' };
+            }
+            // VP8 + webm-muxer (最終WebCodecsフォールバック)
+            if (!selectedCodec && await checkSupport(vp8Cfg, 'VP8-WebM')) {
+              selectedCodec = { type: 'vp8', config: vp8Cfg };
+              _wcCodecCache = { key: codecCacheKey, type: 'vp8' };
+            }
+          }
+
+          console.log('[Export codec-select] selected:', selectedCodec?.type ?? 'none (→ MediaRecorder)');
+          dbgLog('[renderBlob] codec-select done. selected=' + (selectedCodec?.type ?? 'none') + ' frames=' + analysisFrameCount + ' dur=' + analysisDurationMs.toFixed(0) + 'ms fps=' + estimatedFps.toFixed(1) + ' exportVidDur=' + exportVideoElement.duration?.toFixed(2));
+
+          // ── フェーズ2: seek → encode → close（1フレームずつパイプライン処理）────────
+          //
+          // 【旧設計の問題】
+          //   フェーズ2a で全フレームを ImageBitmap として RAM にバッファしてから
+          //   フェーズ2b でエンコードしていたため、
+          //   2940×1846 × 4bytes × 103フレーム ≈ 2.2GB のメモリを要求。
+          //   iOS Safari はタブあたり ~1-1.5GB でタブをkillするため、
+          //   captureLoop START の直後にページがリロードされ最初の画面に戻っていた。
+          //
+          // 【新設計】
+          //   seek → drawFrame → VideoFrame生成 → encoder.encode() → VideoFrame.close()
+          //   を1フレームずつ行うパイプライン方式。
+          //   同時に保持する生画像データは1フレーム分のみ（約22MB）。
+          //   ただし、エンコード失敗時のコーデックfallbackはできないため、
+          //   selectedCodec のみで1回試行し、失敗した場合は MediaRecorder へ fallback する。
+
+          // Annex-B → AVCC 変換（Safari/iOS 向け mp4-muxer 用）
+          const annexBToAvcc = (chunk) => {
+            const src = new Uint8Array(chunk.byteLength);
+            chunk.copyTo(src);
+            const nalUnits = [];
+            let i = 0;
+            while (i < src.length) {
+              if (i + 3 < src.length &&
+                  src[i] === 0 && src[i+1] === 0 && src[i+2] === 0 && src[i+3] === 1) {
+                i += 4;
+              } else if (i + 2 < src.length &&
+                  src[i] === 0 && src[i+1] === 0 && src[i+2] === 1) {
+                i += 3;
+              } else {
+                i++;
+                continue;
+              }
+              let end = i;
+              while (end < src.length) {
+                if (end + 3 < src.length &&
+                    src[end] === 0 && src[end+1] === 0 && src[end+2] === 0 && src[end+3] === 1) break;
+                if (end + 2 < src.length &&
+                    src[end] === 0 && src[end+1] === 0 && src[end+2] === 1) break;
+                end++;
+              }
+              if (end > i) nalUnits.push(src.subarray(i, end));
+              i = end;
+            }
+            if (nalUnits.length === 0) return src;
+            const avccSize = nalUnits.reduce((s, n) => s + 4 + n.length, 0);
+            const avcc = new Uint8Array(avccSize);
+            let off = 0;
+            for (const nal of nalUnits) {
+              const len = nal.length;
+              avcc[off++] = (len >> 24) & 0xff;
+              avcc[off++] = (len >> 16) & 0xff;
+              avcc[off++] = (len >>  8) & 0xff;
+              avcc[off++] =  len        & 0xff;
+              avcc.set(nal, off);
+              off += len;
+            }
+            return avcc;
+          };
+
+          if (selectedCodec) {
+            dbgLog('[renderBlob] pipeline START. codec=' + selectedCodec.type + ' frames=' + analysisFrameCount + ' phoneFlowView=' + phoneFlowView);
+            try {
+              // ── muxer セットアップ ──────────────────────────────────────────
+              let muxer = null;
+              let muxerTarget = null;
+              let outputMimeType = 'video/mp4';
+
+              if (selectedCodec.type === 'avc-avcc' || selectedCodec.type === 'avc-annexb') {
+                const MuxerMod = await loadMp4Muxer();
+                muxerTarget = new MuxerMod.ArrayBufferTarget();
+                muxer = new MuxerMod.Muxer({
+                  target: muxerTarget,
+                  video: { codec: 'avc', width: encW, height: encH },
+                  fastStart: 'in-memory'
+                });
+                outputMimeType = 'video/mp4';
+              } else if (selectedCodec.type === 'vp9') {
+                const WebMMod = await loadWebMMuxer();
+                muxerTarget = new WebMMod.ArrayBufferTarget();
+                muxer = new WebMMod.Muxer({
+                  target: muxerTarget,
+                  video: { codec: 'V_VP9', width: encW, height: encH,
+                    frameRate: wcClampedFps, bitDepth: 8 },
+                  firstTimestampBehavior: 'offset'
+                });
+                outputMimeType = 'video/webm';
+              } else { // vp8
+                const WebMMod = await loadWebMMuxer();
+                muxerTarget = new WebMMod.ArrayBufferTarget();
+                muxer = new WebMMod.Muxer({
+                  target: muxerTarget,
+                  video: { codec: 'V_VP8', width: encW, height: encH,
+                    frameRate: wcClampedFps, bitDepth: 8 },
+                  firstTimestampBehavior: 'offset'
+                });
+                outputMimeType = 'video/webm';
+              }
+
+              const isAnnexB = selectedCodec.type === 'avc-annexb';
+              let flushReject = null;
+              const encoderErrRef = { current: null };
+              const encoder = new VideoEncoder({
+                output: (chunk, meta) => {
+                  try {
+                    if (isAnnexB) {
+                      const avccData = annexBToAvcc(chunk);
+                      const avccChunk = new EncodedVideoChunk({
+                        type: chunk.type,
+                        timestamp: chunk.timestamp,
+                        duration: chunk.duration ?? undefined,
+                        data: avccData
+                      });
+                      muxer.addVideoChunk(avccChunk, meta);
+                    } else {
+                      muxer.addVideoChunk(chunk, meta);
+                    }
+                  } catch (e) {
+                    if (!encoderErrRef.current) {
+                      encoderErrRef.current = e;
+                      console.error('[Export] muxer.addVideoChunk error:', e.message ?? e);
+                    }
+                    if (flushReject) { flushReject(e); flushReject = null; }
+                  }
+                },
+                error: (e) => {
+                  if (!encoderErrRef.current) {
+                    encoderErrRef.current = e;
+                    console.error('[Export] VideoEncoder error:', e.message ?? e);
+                  }
+                  if (flushReject) { flushReject(e); flushReject = null; }
+                }
+              });
+              encoder.configure(selectedCodec.config);
+
+              // configure() 直後の非同期エラーを待つ
+              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+              if (encoderErrRef.current) throw encoderErrRef.current;
+              if (encoder.state === 'closed') throw new Error('[Export] encoder closed after configure()');
+
+              console.log('[Export] pipeline encoding with:', selectedCodec.type,
+                '| codec:', selectedCodec.config.codec,
+                '| encW:', encW, 'encH:', encH,
+                '| frames:', analysisFrameCount);
+
+              const flushWithTimeout = () => new Promise((resolve, reject) => {
+                flushReject = reject;
+                const timer = setTimeout(() => {
+                  flushReject = null;
+                  reject(new Error('[Export] encoder.flush() timed out (10s)'));
+                }, 10000);
+                encoder.flush().then(() => {
+                  clearTimeout(timer);
+                  flushReject = null;
+                  if (encoderErrRef.current) { reject(encoderErrRef.current); } else { resolve(); }
+                }).catch((e) => {
+                  clearTimeout(timer);
+                  flushReject = null;
+                  reject(e);
+                });
+              });
+
+              // ── seek → encode → close パイプライン（1フレームずつ、メモリ節約）──
+              let pipelineTimeoutHandle = null;
+              const pipelineTimeout = new Promise((_, rej) => {
+                pipelineTimeoutHandle = setTimeout(() => {
+                  rej(createAppError('ANALYZED_VIDEO_EXPORT_TIMEOUT', '解析動画の生成がタイムアウトしました。'));
+                }, exportTotalMs);
+              });
+
+              const pipelineLoop = async () => {
+                for (let i = 0; i < analysisFrameCount; i++) {
+                  if (encoderErrRef.current) throw encoderErrRef.current;
+                  if (encoder.state === 'closed') throw new Error('[Export] encoder closed at frame ' + i);
+
+                  const dataPoint = analysisData[i];
+                  const targetSec = (analysisVideoStartMs + (dataPoint.elapsedMs ?? 0)) / 1000;
+                  const ptsMicros = Math.round(((dataPoint.elapsedMs ?? 0) - firstElapsedMs) * 1000);
+                  const dur = i < analysisFrameCount - 1
+                    ? Math.round(((analysisData[i + 1]?.elapsedMs ?? analysisData[i].elapsedMs) - (analysisData[i].elapsedMs ?? 0)) * 1000)
+                    : Math.round((analysisDurationMs / Math.max(1, analysisFrameCount - 1)) * 1000);
+                  const safeDur = Math.max(1000, dur);
+                  const isKeyFrame = (i === 0) || (i % wcKeyFrameInterval === 0);
+
+                  // seek
+                  await seekTo(targetSec);
+                  if (exportVideoElement.readyState < 2) {
+                    await new Promise(r => {
+                      const check = () => {
+                        if (exportVideoElement.readyState >= 2) { r(); return; }
+                        setTimeout(check, 50);
+                      };
+                      setTimeout(check, 50);
+                      setTimeout(r, 1000);
+                    });
+                  }
+
+                  // draw → VideoFrame → encode → 即close（メモリ解放）
+                  drawFrame(dataPoint);
+                  const bitmap = await createImageBitmap(exportCanvas, 0, 0, expW, expH,
+                    { resizeWidth: encW, resizeHeight: encH });
+                  const vf = new VideoFrame(bitmap, { timestamp: ptsMicros, duration: safeDur });
+                  bitmap.close(); // ← 即解放（旧設計では溜め込んでいた）
+                  encoder.encode(vf, { keyFrame: isKeyFrame });
+                  vf.close();
+
+                  // プログレス 0〜99%
+                  if (onProgress) onProgress(Math.min(99, ((i + 1) / analysisFrameCount) * 99));
+                  if (i < 5 || i === analysisFrameCount - 1 || i % 10 === 0) {
+                    dbgLog('[pipeline] frame ' + (i+1) + '/' + analysisFrameCount + ' pts=' + ptsMicros + ' target=' + targetSec.toFixed(3) + ' ct=' + exportVideoElement.currentTime.toFixed(3) + ' rs=' + exportVideoElement.readyState);
+                  }
+                }
+              };
+
+              try {
+                await Promise.race([pipelineLoop(), pipelineTimeout]);
+              } finally {
+                if (pipelineTimeoutHandle !== null) clearTimeout(pipelineTimeoutHandle);
+              }
+
+              dbgLog('[renderBlob] pipeline loop DONE. frames=' + analysisFrameCount + ' phoneFlowView=' + phoneFlowView);
+
+              // flush
+              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+              if (encoderErrRef.current) throw encoderErrRef.current;
+              console.log('[Export] all frames encoded, calling flush()...');
+              await flushWithTimeout();
+              console.log('[Export] flush() done');
+              muxer.finalize();
+              console.log('[Export] muxer.finalize() done');
+
+              // encoder close
+              if (encoder.state !== 'closed') {
+                try { encoder.close(); } catch (_) {}
+              }
+
+              const { buffer } = muxerTarget;
+              exportBlob = new Blob([buffer], { type: outputMimeType });
+              exportMimeType = outputMimeType;
+              const cacheTypeMap = {
+                'avc-avcc': 'avc-avcc-high', 'avc-annexb': 'avc-annexb-high',
+                'vp9': 'vp9', 'vp8': 'vp8'
+              };
+              _wcCodecCache = { key: codecCacheKey, type: cacheTypeMap[selectedCodec.type] ?? selectedCodec.type };
+              console.log('[Export] done — codec:', selectedCodec.type,
+                '| mimeType:', outputMimeType,
+                '| size:', exportBlob.size, 'bytes');
+
+            } catch (pipelineErr) {
+              console.warn('[Export pipeline] failed:', pipelineErr.message ?? pipelineErr, '— falling back to MediaRecorder');
+              dbgLog('[renderBlob] pipeline FAILED: ' + (pipelineErr.message ?? pipelineErr) + ' phoneFlowView=' + phoneFlowView);
+              _wcCodecCache = null;
+              exportBlob = null;
+            }
+          }
+
+          dbgLog('[renderBlob] WebCodecs phase done. exportBlob=' + !!exportBlob + ' phoneFlowView=' + phoneFlowView);
         }
-        recorder.start();
-        exportActive = true;
 
-        const hasKnownDuration = Number.isFinite(exportVideoElement.duration) && exportVideoElement.duration > 0;
-        const exportTimeoutMs  = hasKnownDuration
-          ? Math.max(15000, Math.ceil(exportVideoElement.duration * 2000 + 3000))
-          : 20000;
+        // ── MediaRecorder フォールバックパス ─────────────────────────────────
+        // WebCodecs (AVC / VP9 / VP8) が全て失敗した場合のみ到達する。
+        // 矢状面（~2.4fps, seek~500ms）では seek 時間がフレーム間隔を超えるため
+        // スローモーションになる可能性があるが、WebCodecs 非対応環境向けの最終手段。
+        if (!exportBlob) {
+          const exportBitrate = estimateExportVideoBitrate({
+            width: expW,
+            height: expH,
+            fps: Math.round(Math.min(30, Math.max(5, estimatedFps)))
+          });
 
-        let exportTimeoutHandle = null;
-        try {
-          await exportVideoElement.play();
-          // play() が解決してから描画ループ開始（最初のフレームが確実に描かれた後）
-          if (exportVideoElement.requestVideoFrameCallback) {
-            exportFrameHandle = exportVideoElement.requestVideoFrameCallback(renderExportFrame);
-          } else {
-            exportFrameHandle = requestAnimationFrame(renderExportFrame);
-          }
+          const stream = exportCanvas.captureStream(0);
+          const track = stream.getVideoTracks()[0];
+          const hasRequestFrame = track && typeof track.requestFrame === 'function';
+          console.log('[Export MR] fallback | hasRequestFrame:', hasRequestFrame);
+          const chunks = [];
+          const { mimeType: mrMimeType, recorder } = createCanvasRecordingSession({
+            stream,
+            MediaRecorderCtor: MediaRecorder,
+            videoBitsPerSecond: exportBitrate
+          });
 
-          await Promise.race([
-            recorderStopPromise,
-            videoErrorPromise,
-            new Promise((_, reject) => {
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) chunks.push(e.data);
+          };
+
+          const recorderStopPromise = new Promise((resolve, reject) => {
+            const onStop  = () => { cleanupRecorderListeners?.(); resolve(); };
+            const onError = () => { cleanupRecorderListeners?.(); reject(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '解析動画の録画に失敗しました。')); };
+            cleanupRecorderListeners = () => {
+              recorder.removeEventListener('stop',  onStop);
+              recorder.removeEventListener('error', onError);
+            };
+            recorder.addEventListener('stop',  onStop);
+            recorder.addEventListener('error', onError);
+          });
+
+          let exportTimeoutHandle = null;
+          try {
+            recorder.start();
+
+            const exportTimeoutPromise = new Promise((_, reject) => {
               exportTimeoutHandle = setTimeout(() => {
                 reject(createAppError('ANALYZED_VIDEO_EXPORT_TIMEOUT', '解析動画の生成がタイムアウトしました。'));
-              }, exportTimeoutMs);
-            })
-          ]);
-        } catch (exportError) {
-          await finishExport();
-          throw exportError;
-        } finally {
-          if (exportTimeoutHandle) clearTimeout(exportTimeoutHandle);
+              }, exportTotalMs);
+            });
+
+            const doMRExport = async () => {
+              // フレーム間の「正しい間隔(ms)」を elapsedMs の差分から求め、
+              // seek完了後に不足分だけ sleep することで
+              // requestFrame() の呼び出し実時間間隔を動画の正しいフレーム間隔に揃える。
+              let frameIntervalDeadlineMs = performance.now();
+
+              for (let i = 0; i < analysisFrameCount; i++) {
+                const dataPoint = analysisData[i];
+                const targetSec = (analysisVideoStartMs + (dataPoint.elapsedMs ?? 0)) / 1000;
+                const prevElapsedMs = i > 0 ? (analysisData[i - 1]?.elapsedMs ?? dataPoint.elapsedMs) : dataPoint.elapsedMs;
+                const frameIntervalMs = i > 0
+                  ? Math.max(16, (dataPoint.elapsedMs ?? 0) - (prevElapsedMs ?? 0))
+                  : 0;
+
+                frameIntervalDeadlineMs += frameIntervalMs;
+
+                await seekTo(targetSec);
+                drawFrame(dataPoint);
+
+                const nowMs = performance.now();
+                const waitMs = frameIntervalDeadlineMs - nowMs;
+                if (waitMs > 1) {
+                  await new Promise(r => setTimeout(r, waitMs));
+                }
+
+                if (hasRequestFrame) {
+                  track.requestFrame();
+                } else {
+                  await new Promise(r => requestAnimationFrame(r));
+                }
+
+                if (onProgress) {
+                  onProgress(Math.min(99, ((i + 1) / analysisFrameCount) * 100));
+                }
+                if (i < 5) {
+                  console.log('[Export MR] frame', i + 1, '/', analysisFrameCount,
+                    '| targetSec:', targetSec.toFixed(4),
+                    '| frameIntervalMs:', frameIntervalMs.toFixed(1),
+                    '| waited:', Math.max(0, waitMs).toFixed(1) + 'ms');
+                }
+              }
+
+              if (recorder.state !== 'inactive') {
+                recorder.stop();
+              }
+            };
+
+            await Promise.race([doMRExport(), exportTimeoutPromise]);
+            await Promise.race([
+              recorderStopPromise,
+              new Promise((_, rej) => setTimeout(() => rej(createAppError('ANALYZED_VIDEO_EXPORT_FAILED', '録画停止がタイムアウトしました。')), 10000))
+            ]);
+
+            exportBlob = new Blob(chunks, { type: mrMimeType });
+            exportMimeType = mrMimeType;
+
+          } catch (exportError) {
+            if (recorder.state !== 'inactive') {
+              try { recorder.stop(); } catch (_) {}
+            }
+            throw exportError;
+          } finally {
+            if (exportTimeoutHandle) clearTimeout(exportTimeoutHandle);
+          }
+        } // end MediaRecorder fallback
+
+        // メイン canvas の表示を元に戻す（エクスポート後のプレビュー用）
+        // videoElement.src をクリアしたため getSafeVideoElapsedMs は 0 を返す。
+        // analysisData の最終フレームを直接描画してキャンバスを復元する。
+        // (videoElement が復元されたあとも正しく再描画される)
+        {
+          const lastDataPoint = analysisData[analysisData.length - 1] ?? null;
+          if (lastDataPoint?.landmarks?.length && canvasElement.width > 0 && canvasElement.height > 0) {
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            // ランドマークのみ描画（動画フレームはvideoElement復元後に上書き）
+            // analysisData のランドマークはキャンバス全体で正規化されているため
+            // videoW/H を渡すと黒帯オフセット二重適用になる。videoW=0/videoH=0 で正しく描画。
+            drawEnhancedLandmarks(
+              lastDataPoint.landmarks,
+              lastDataPoint.worldLandmarks || null,
+              false,
+              canvasCtx,
+              canvasElement.width,
+              canvasElement.height,
+              0,
+              0
+            );
+          }
         }
 
         return {
-          blob: new Blob(chunks, { type: mimeType }),
-          mimeType
+          blob: exportBlob,
+          mimeType: exportMimeType
         };
 
       } finally {
         // ── 必ずオフスクリーン資源を解放 ─────────────────────────────────────
-        if (typeof endedHandler === 'function') {
-          exportVideoElement.removeEventListener('ended', endedHandler);
-        }
-        if (typeof videoErrorHandler === 'function') {
-          exportVideoElement.removeEventListener('error', videoErrorHandler);
-        }
         cleanupRecorderListeners?.();
         exportVideoElement.pause();
         exportVideoElement.removeAttribute('src');
         exportVideoElement.load();
-        // DOM に追加した場合は削除する
         if (exportVideoElement.parentNode) {
           exportVideoElement.parentNode.removeChild(exportVideoElement);
         }
+        // exportVideoUrl は fetch() で作成した専用 ObjectURL。必ず revoke する。
+        // videoFileUrl と同じ URL の場合（フォールバック時）は revoke しない。
+        if (exportVideoUrl && exportVideoUrl !== videoFileUrl) {
+          try { URL.revokeObjectURL(exportVideoUrl); } catch (_) {}
+          exportVideoUrl = null;
+        }
         isGeneratingAnalyzedPreview = false;
         syncPhoneStageActions();
+
+        // ── メインvideoElementの onended を再登録 ────────────────────────────
+        // try ブロックでは videoElement.pause() + onended=null のみ実行。
+        // videoElement.src は変更していないため、load() を呼ぶ必要はない。
+        // load() を呼ぶと iOS Safari が loadedmetadata/canplay/error イベントを発火させ
+        // loadVideoFile の catch ブロックに伝搬して画面リセットを引き起こす。
+        //
+        // onended ハンドラーをここで再登録することで、次回の解析完了時に
+        // finalizeSession()/stopAllProcessing() が正しく実行される。
+        dbgLog('[renderAnalyzedVideoBlob] finally: re-registering onended. videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' currentOnended=' + (videoElement.onended ? 'set' : 'null'));
+        if (videoElement && videoFileUrl && !videoElement.onended) {
+          videoElement.onended = async () => {
+            dbgLog('[onended-restored] fired! isAnalyzing=' + isAnalyzing + ' analysisData=' + analysisData.length);
+            videoElement.onended = null;
+            if (isAnalyzing) {
+              await finalizeSession();
+              stopAllProcessing();
+              if (videoFileUrl && analysisData.length > 0) {
+                showNotification('解析完了！', 'success');
+                if (deviceMode === 'phone') {
+                  setTimeout(async () => {
+                    dbgLog('[AutoPreview] 200ms setTimeout fired (restored handler), calling ensureAnalyzedPreviewReady');
+                    try {
+                      await ensureAnalyzedPreviewReady({ notify: false });
+                      dbgLog('[AutoPreview] SUCCESS (restored handler)');
+                      showNotification('解析プレビューを表示しました。下にスクロールして確認できます。', 'success');
+                    } catch (e) {
+                      dbgLog('[AutoPreview] FAILED (restored handler): code=' + e?.code + ' msg=' + e?.message);
+                      console.warn('[AutoPreview] 自動プレビュー生成に失敗 phoneFlowView=' + phoneFlowView + ' analysisData.length=' + analysisData.length, e);
+                    }
+                  }, 200);
+                }
+              } else if (videoFileUrl && analysisData.length === 0) {
+                showNotification('解析データが取得できませんでした。動画に人物が映っているか確認してください。', 'warning');
+              }
+            }
+          };
+          dbgLog('[renderAnalyzedVideoBlob] finally: onended handler re-registered');
+        } else {
+          dbgLog('[renderAnalyzedVideoBlob] finally: skip re-register onended. videoElement=' + !!videoElement + ' videoFileUrl=' + !!videoFileUrl + ' onended=' + (videoElement?.onended ? 'set' : 'null'));
+        }
       }
     }
 
     async function ensureAnalyzedPreviewReady({ notify = true, onProgress = null } = {}) {
+      dbgLog('[ensurePreview] start hasBlob=' + !!analyzedPreviewBlob + ' hasUrl=' + !!analyzedPreviewUrl + ' analysisData=' + analysisData.length + ' phoneFlowView=' + phoneFlowView);
       if (analyzedPreviewBlob && analyzedPreviewUrl) {
         return {
           blob: analyzedPreviewBlob,
@@ -2577,21 +3936,17 @@
       }
 
       const result = await renderAnalyzedVideoBlob({ showStartMessage: false, onProgress });
+      dbgLog('[ensurePreview] renderBlob DONE. phoneFlowView=' + phoneFlowView + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null'));
       analyzedPreviewBlob = result.blob;
       analyzedPreviewMimeType = result.mimeType;
       analyzedPreviewUrl = revokePreviewUrl(analyzedPreviewUrl);
       analyzedPreviewUrl = URL.createObjectURL(result.blob);
+      dbgLog('[ensurePreview] syncPhoneVideoPreviews. phoneFlowView=' + phoneFlowView);
       syncPhoneVideoPreviews();
       return result;
     }
 
-    // Save analyzed video (for video file mode)
     async function saveAnalyzedVideo() {
-      if (isSavingAnalyzedVideo) {
-        showNotification('解析動画の保存処理を実行中です。完了までお待ちください。', 'warning');
-        return;
-      }
-
       if (!videoFileUrl) {
         showNotification('動画ファイルがありません', 'error');
         return;
@@ -2626,16 +3981,22 @@
           }
         });
 
-        progressNotif.finish('解析動画の生成が完了しました。ダウンロードを開始します。');
+        progressNotif.finish('解析動画の生成が完了しました。');
 
-        downloadBlob({
+        const videoFilename = buildAnalyzedVideoFilename({ patientId, mimeType });
+        const shareResult = await shareOrDownloadBlob({
           blob,
-          filename: buildAnalyzedVideoFilename({ patientId, mimeType }),
+          filename: videoFilename,
           URLRef: URL,
-          documentRef: document
+          documentRef: document,
+          navigatorRef: navigator
         });
 
-        showNotification('解析動画を保存しました', 'success');
+        if (shareResult === 'shared') {
+          showNotification('共有シートを開きました。「ファイルに保存」などで保存してください。', 'success');
+        } else {
+          showNotification('解析動画を保存しました', 'success');
+        }
       } catch (error) {
         progressNotif.dismiss();
         // ボタンを元の表示に戻す
@@ -2645,6 +4006,11 @@
         });
         if (error?.code === 'ANALYZED_PREVIEW_BUSY') {
           showNotification(error.message, 'warning');
+          return;
+        }
+        // ユーザーが共有シートをキャンセルした場合はエラー通知不要
+        if (error?.name === 'AbortError') {
+          showNotification('共有をキャンセルしました', 'info');
           return;
         }
         console.error('[Save Analyzed Video] Error:', error);
@@ -2657,7 +4023,6 @@
       syncPhoneQuickActions();
     }
 
-    // Export CSV
     function exportCSV() {
       if (analysisData.length === 0) {
         showNotification('エクスポートするデータがありません', 'error');
@@ -2678,7 +4043,6 @@
       showNotification('CSVエクスポート完了', 'success');
     }
 
-    // Export report to PDF
     async function exportReportToPDF() {
       try {
         showNotification('PDF生成中...', 'info');
@@ -2724,11 +4088,9 @@
       }
     }
 
-    // Render mini charts for report
-    // Report charts storage
     let reportCharts = { knee: null, hip: null, timeline: null };
 
-    function renderReportCharts(avgLeftKnee, avgRightKnee, avgLeftHip, avgRightHip, avgLeftAnkle, avgRightAnkle, reportPlane) {
+    function renderReportCharts(avgLeftKnee, avgRightKnee, avgLeftHip, avgRightHip, avgLeftAnkle, avgRightAnkle, reportPlane, kneePeaks) {
       // Destroy existing charts to prevent memory leaks
       if (reportCharts.knee) reportCharts.knee.destroy();
       if (reportCharts.hip) reportCharts.hip.destroy();
@@ -2736,66 +4098,102 @@
 
       // 前額面では関節角度チャートは表示しない（矢状面のみ）
       if (reportPlane === 'sagittal') {
-        // Knee comparison chart
+        // ── 膝関節グループバーチャート（平均 + ピーク） ──────────────────
         const kneeCtx = document.getElementById('report-knee-chart');
         if (kneeCtx) {
+          // ピーク値（kneePeaks 有効時）
+          const hasPeaks = kneePeaks && (kneePeaks.leftStrideCount >= 2 || kneePeaks.rightStrideCount >= 2);
+          const leftSwing  = hasPeaks ? kneePeaks.leftSwingPeakMedian  : null;
+          const rightSwing = hasPeaks ? kneePeaks.rightSwingPeakMedian : null;
+          const leftExt    = hasPeaks ? kneePeaks.leftStanceMinMedian  : null;
+          const rightExt   = hasPeaks ? kneePeaks.rightStanceMinMedian : null;
+
+          const datasets = [
+            {
+              label: '平均角度',
+              data: [avgLeftKnee, avgRightKnee],
+              backgroundColor: ['rgba(59,130,246,0.6)', 'rgba(239,68,68,0.6)'],
+              borderColor:     ['#3b82f6', '#ef4444'],
+              borderWidth: 1,
+              borderRadius: 3
+            }
+          ];
+          if (hasPeaks) {
+            datasets.push({
+              label: '遊脚最大屈曲',
+              data: [leftSwing ?? 0, rightSwing ?? 0],
+              backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(245,158,11,0.7)'],
+              borderColor:     ['#10b981', '#f59e0b'],
+              borderWidth: 1,
+              borderRadius: 3
+            });
+            datasets.push({
+              label: '立脚最小伸展',
+              data: [leftExt ?? 0, rightExt ?? 0],
+              backgroundColor: ['rgba(139,92,246,0.5)', 'rgba(236,72,153,0.5)'],
+              borderColor:     ['#8b5cf6', '#ec4899'],
+              borderWidth: 1,
+              borderRadius: 3
+            });
+          }
+
+          // Y軸の上限をデータの最大値から動的に決定（最低でも90°）
+          const kneeDataValues = datasets.flatMap(ds => ds.data).filter(v => Number.isFinite(v) && v > 0);
+          const kneeYMax = Math.ceil(Math.max(90, ...kneeDataValues) / 10) * 10 + 10;
           reportCharts.knee = new Chart(kneeCtx, {
             type: 'bar',
-            data: {
-              labels: ['左膝', '右膝'],
-              datasets: [{
-                label: '膝関節角度 (°)',
-                data: [avgLeftKnee, avgRightKnee],
-                backgroundColor: ['#3b82f6', '#ef4444'],
-                borderRadius: 4
-              }]
-            },
+            data: { labels: ['左膝', '右膝'], datasets },
             options: {
-              indexAxis: 'y',
               responsive: true,
               maintainAspectRatio: false,
+              layout: { padding: { top: hasPeaks ? 8 : 4 } },
               plugins: {
-                legend: { display: false },
-                title: { display: true, text: '膝関節角度', font: { size: 11 } }
+                legend: { display: hasPeaks, position: 'top', labels: { font: { size: 10 }, boxWidth: 10, padding: 4 } },
+                title: { display: true, text: hasPeaks ? '膝関節角度（平均・遊脚屈曲・立脚伸展）' : '膝関節平均角度', font: { size: 11 }, padding: { bottom: 4 } }
               },
               scales: {
-                x: {
+                x: { stacked: false },
+                y: {
                   beginAtZero: true,
-                  max: 80,
-                  title: { display: false }
+                  max: kneeYMax,
+                  title: { display: true, text: '角度 (°)', font: { size: 10 } }
                 }
               }
             }
           });
         }
 
-        // Hip comparison chart
+        // ── 股関節バーチャート（注記付き） ──────────────────────────────
         const hipCtx = document.getElementById('report-hip-chart');
         if (hipCtx) {
+          const hipDataValues = [avgLeftHip, avgRightHip].filter(v => Number.isFinite(v) && v > 0);
+          const hipYMax = Math.ceil(Math.max(60, ...hipDataValues) / 10) * 10 + 10;
           reportCharts.hip = new Chart(hipCtx, {
             type: 'bar',
             data: {
-              labels: ['左股関節', '右股関節'],
+              labels: ['左', '右'],
               datasets: [{
-                label: '股関節角度 (°)',
+                label: '体幹-大腿角度 (°)',
                 data: [avgLeftHip, avgRightHip],
-                backgroundColor: ['#10b981', '#f59e0b'],
-                borderRadius: 4
+                backgroundColor: ['rgba(16,185,129,0.6)', 'rgba(245,158,11,0.6)'],
+                borderColor:     ['#10b981', '#f59e0b'],
+                borderWidth: 1,
+                borderRadius: 3
               }]
             },
             options: {
-              indexAxis: 'y',
               responsive: true,
               maintainAspectRatio: false,
+              layout: { padding: { top: 4 } },
               plugins: {
                 legend: { display: false },
-                title: { display: true, text: '股関節角度', font: { size: 11 } }
+                title: { display: true, text: '股関節角度（肩-股-膝 参考値）', font: { size: 11 }, padding: { bottom: 4 } }
               },
               scales: {
-                x: {
+                y: {
                   beginAtZero: true,
-                  max: 60,
-                  title: { display: false }
+                  max: hipYMax,
+                  title: { display: true, text: '角度 (°)', font: { size: 10 } }
                 }
               }
             }
@@ -2803,75 +4201,114 @@
         }
       } // end sagittal-only charts
 
-      // Timeline chart (speed & symmetry)
+      // ── 時系列チャート ──────────────────────────────────────────────────
       const timelineCtx = document.getElementById('report-timeline-chart');
       if (timelineCtx) {
-        // Sample data points (max 100 for performance)
         const step = Math.max(1, Math.floor(analysisData.length / 100));
         const sampledData = analysisData.filter((_, i) => i % step === 0);
+        const isSagittal = reportPlane === 'sagittal';
+
+        const timelineDatasets = [
+          {
+            label: '歩行速度 (m/s)',
+            data: sampledData.map(d => d.speed),
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            tension: 0.4,
+            yAxisID: 'y',
+            pointRadius: 0
+          },
+          {
+            label: '対称性 (%)',
+            data: sampledData.map(d => d.symmetry),
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16,185,129,0.1)',
+            tension: 0.4,
+            yAxisID: 'y1',
+            pointRadius: 0
+          }
+        ];
+
+        // 矢状面では左右膝角度を追加表示
+        if (isSagittal) {
+          timelineDatasets.push({
+            label: '左膝角度 (°)',
+            data: sampledData.map(d => d.leftKnee),
+            borderColor: '#8b5cf6',
+            backgroundColor: 'rgba(139,92,246,0.05)',
+            tension: 0.3,
+            yAxisID: 'y2',
+            pointRadius: 0,
+            borderDash: [4, 2]
+          });
+          timelineDatasets.push({
+            label: '右膝角度 (°)',
+            data: sampledData.map(d => d.rightKnee),
+            borderColor: '#ec4899',
+            backgroundColor: 'rgba(236,72,153,0.05)',
+            tension: 0.3,
+            yAxisID: 'y2',
+            pointRadius: 0,
+            borderDash: [4, 2]
+          });
+        }
+
+        // Y軸レンジを実データから動的に決定
+        const speedValues = sampledData.map(d => d.speed).filter(v => v > 0);
+        const speedMax = speedValues.length > 0
+          ? Math.ceil(Math.max(2, ...speedValues) * 10) / 10 + 0.2
+          : 2;
+        const kneeValues = isSagittal
+          ? sampledData.flatMap(d => [d.leftKnee, d.rightKnee]).filter(v => v > 0)
+          : [];
+        const kneeMax = kneeValues.length > 0
+          ? Math.ceil(Math.max(90, ...kneeValues) / 10) * 10 + 10
+          : 120;
+
+        const timelineScales = {
+          x: { title: { display: true, text: '経過時間', font: { size: 10 } }, ticks: { maxTicksLimit: 10 } },
+          y: {
+            type: 'linear', display: true, position: 'left',
+            title: { display: true, text: '速度 (m/s)', font: { size: 10 } },
+            min: 0, max: speedMax
+          },
+          y1: {
+            type: 'linear', display: true, position: 'right',
+            title: { display: true, text: '対称性 (%)', font: { size: 10 } },
+            min: 0, max: 100,
+            grid: { drawOnChartArea: false }
+          }
+        };
+
+        if (isSagittal) {
+          timelineScales.y2 = {
+            type: 'linear', display: true, position: 'right',
+            title: { display: true, text: '膝角度 (°)', font: { size: 10 } },
+            min: 0, max: kneeMax,
+            grid: { drawOnChartArea: false }
+          };
+        }
 
         reportCharts.timeline = new Chart(timelineCtx, {
           type: 'line',
           data: {
             labels: sampledData.map(d => (((d.elapsedMs ?? d.timestamp ?? 0) / 1000).toFixed(1) + 's')),
-            datasets: [
-              {
-                label: '歩行速度 (m/s)',
-                data: sampledData.map(d => d.speed),
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                tension: 0.4,
-                yAxisID: 'y'
-              },
-              {
-                label: '対称性 (%)',
-                data: sampledData.map(d => d.symmetry),
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                tension: 0.4,
-                yAxisID: 'y1'
-              }
-            ]
+            datasets: timelineDatasets
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-              mode: 'index',
-              intersect: false
-            },
+            interaction: { mode: 'index', intersect: false },
             plugins: {
               title: { display: false },
-              legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 8 } }
+              legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 10, padding: 6 } }
             },
-            scales: {
-              x: {
-                title: { display: true, text: '経過時間', font: { size: 10 } }
-              },
-              y: {
-                type: 'linear',
-                display: true,
-                position: 'left',
-                title: { display: true, text: '歩行速度 (m/s)', font: { size: 10 } },
-                min: 0,
-                max: 2
-              },
-              y1: {
-                type: 'linear',
-                display: true,
-                position: 'right',
-                title: { display: true, text: '対称性 (%)', font: { size: 10 } },
-                min: 0,
-                max: 100,
-                grid: { drawOnChartArea: false }
-              }
-            }
+            scales: timelineScales
           }
         });
       }
     }
 
-    // Generate report
     function generateReport() {
       if (analysisData.length === 0) {
         showNotification('レポート生成するデータがありません', 'error');
@@ -2888,7 +4325,8 @@
         captureMode: getAnalysisSourceMode() === 'video' ? 'video' : 'camera',
         totalProcessedFrames: analysisFrameCount,
         gaitEvents,
-        appVersion: APP_VERSION_LABEL
+        appVersion: APP_VERSION_LABEL,
+        kneePeaks: kneePeakTracker.getSummary()
       });
 
       const reportHTML = buildReportHtml(summary);
@@ -2899,15 +4337,13 @@
       });
 
       setTimeout(() => {
-        renderReportCharts(summary.avgLeftKnee, summary.avgRightKnee, summary.avgLeftHip, summary.avgRightHip, summary.avgLeftAnkle, summary.avgRightAnkle, summary.reportPlane);
+        renderReportCharts(summary.avgLeftKnee, summary.avgRightKnee, summary.avgLeftHip, summary.avgRightHip, summary.avgLeftAnkle, summary.avgRightAnkle, summary.reportPlane, summary.kneePeaks);
       }, 100);
 
       openReportModal({ documentRef: document });
       showNotification('レポートを表示しました', 'success');
     }
 
-    // Event listeners
-    // Check if user has already consented
     restoreScreenState({
       documentRef: document,
       hasConsented: hasStoredConsent({ localStorageRef: localStorage })
@@ -2922,7 +4358,6 @@
     const patientSubmitBtn = document.getElementById('patient-submit-btn');
     const patientIdError = document.getElementById('patient-id-error');
 
-    // Load last patient ID from localStorage
     const storedPatient = buildStoredPatientIdState({
       localStorageRef: localStorage,
       validatePatientId
@@ -2942,7 +4377,6 @@
       });
     });
 
-    // Patient ID edit functionality
     document.getElementById('patient-display').addEventListener('click', () => {
       const newId = prompt('対象者IDを変更してください（匿名コードのみ）:', patientId);
       if (newId && newId.trim() !== '') {
@@ -3033,12 +4467,10 @@
     async function handleRecordAction() {
       const now = Date.now();
       if ((now - lastRecordActionAt) < RECORD_ACTION_COOLDOWN_MS) {
-        console.warn('[Record Action] Ignored rapid duplicate trigger');
         return;
       }
 
       if (isHandlingRecordAction) {
-        console.warn('[Record Action] Ignored duplicate trigger while previous action is still running');
         return;
       }
 
@@ -3101,6 +4533,18 @@
     document.getElementById('btn-reset-charts').addEventListener('click', () => chartController.resetCharts());
     document.getElementById('btn-settings').addEventListener('click', openDataSettingsMenu);
 
+    // ── 指標ガイドモーダル ─────────────────────────────────────────────────
+    const openGuide = () => openGuideModal({ documentRef: document });
+    document.getElementById('btn-guide').addEventListener('click', openGuide);
+    document.getElementById('btn-guide-close').addEventListener('click', () => closeGuideModal({ documentRef: document }));
+    // スマホ版ステージパネルのガイドボタン
+    const phoneGuideBtn = document.getElementById('btn-phone-stage-guide');
+    if (phoneGuideBtn) phoneGuideBtn.addEventListener('click', openGuide);
+    // モーダル外クリックで閉じる
+    document.getElementById('guide-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'guide-modal') closeGuideModal({ documentRef: document });
+    });
+
     setupInstallPrompt({
       windowRef: window,
       navigatorRef: navigator,
@@ -3111,9 +4555,7 @@
 
     applyViewportHeightVar({ documentRef: document, windowRef: window });
     syncDeviceModeUi();
-    refreshCameraOptions().catch((error) => {
-      console.warn('[Camera] Initial camera option refresh failed:', error);
-    });
+    refreshCameraOptions().catch(() => {});
 
     cameraSelect.addEventListener('change', async () => {
       const value = cameraSelect.value;
@@ -3160,9 +4602,6 @@
     window.addEventListener('orientationchange', handleViewportChange);
     window.visualViewport?.addEventListener('resize', handleViewportChange);
 
-    // Memory cleanup every 5 minutes (idle only, never interrupt an active session)
-    // Note: poseLandmarker.close() destroys the WebGL context, so we skip re-init here.
-    // The instance stays alive until the page is reloaded.
     setInterval(async () => {
       if (!isRecording && !isAnalyzing && getAnalysisSourceMode() === 'idle') {
         // No-op: avoid close() which causes WebGL context loss on next use.
@@ -3173,22 +4612,15 @@
       }
     }, 300000);
 
-    console.log('Gait VISION forPT initialized successfully');
-
-    // Network status monitoring
     window.addEventListener('online', () => {
-      console.log('[Network] Online');
       showNotification('オンラインに復帰しました', 'success');
     });
 
     window.addEventListener('offline', () => {
-      console.log('[Network] Offline');
       showNotification('オフラインモードで動作中（初回起動済みのため、分析機能は正常に動作します）', 'info');
     });
 
-    // Initial network status check
     if (!navigator.onLine) {
-      console.log('[Network] Starting in offline mode');
       setTimeout(() => {
         showNotification('オフラインモードで動作中', 'info');
       }, 2000);

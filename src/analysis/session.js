@@ -2,18 +2,34 @@ export function calculateCadenceFromEvents({
   gaitEvents,
   mpTimestamp,
   timeWindowMs = 10000,
-  minCadence = 60,
+  minCadence = 30,
   maxCadence = 200
 }) {
-  const recentEvents = gaitEvents.filter((event) => (mpTimestamp - event.timestamp) < timeWindowMs);
+  // 現在タイムスタンプ以前かつ timeWindowMs 以内のイベントのみを対象にする
+  // (mpTimestamp - event.timestamp) が負のイベント（将来のタイムスタンプ）は除外
+  const recentEvents = gaitEvents.filter((event) => {
+    const age = mpTimestamp - event.timestamp;
+    return age >= 0 && age < timeWindowMs;
+  });
 
   let cadence = 0;
   if (recentEvents.length >= 2) {
-    cadence = (recentEvents.length / (timeWindowMs / 1000)) * 60;
+    // 実際のイベント時間スパン（最初〜最後のイベント間隔）を基準に計算する。
+    // 以前は常に timeWindowMs(10秒) で割っていたため、解析開始後10秒未満では
+    // イベント数が少なく cadence が大幅に過小評価されていた（例: 5秒時点で半分）。
+    // 修正: (イベント数-1) / 実際のスパン(秒) × 60 = ステップ/分
+    const spanMs = recentEvents[recentEvents.length - 1].timestamp - recentEvents[0].timestamp;
+    if (spanMs > 100) {
+      cadence = ((recentEvents.length - 1) / (spanMs / 1000)) * 60;
+    }
   } else if (recentEvents.length === 1 && gaitEvents.length >= 2) {
+    // ウィンドウ内に1件しかない場合は直近2イベントの間隔からケイデンスを推定する。
+    // 上限を 4000ms に拡張: リハビリ患者の遅歩き（15 spm 相当）まで対応。
+    // timeBetweenSteps < 2000 の旧制限は 30 spm (=2000ms) が通過できず
+    // minCadence=30 のデフォルト設定と矛盾していた。
     const lastTwo = gaitEvents.slice(-2);
     const timeBetweenSteps = lastTwo[1].timestamp - lastTwo[0].timestamp;
-    if (timeBetweenSteps > 0 && timeBetweenSteps < 2000) {
+    if (timeBetweenSteps > 0 && timeBetweenSteps < 4000) {
       cadence = 60000 / timeBetweenSteps;
     }
   }
@@ -48,7 +64,7 @@ export function buildAnalysisDataPoint({
     landmarks,
     worldLandmarks,
     angles,
-    speed: clampMetric(emaValues.speed, 0, Number.POSITIVE_INFINITY),
+    speed: clampMetric(emaValues.speed, 0, 5),
     cadence: clampMetric(emaValues.cadence, 0, 200),
     symmetry: clampMetric(kneeSymmetry, 0, 100, 100),
     trunk: clampMetric(emaValues.trunk, 0, 45),

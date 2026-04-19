@@ -76,6 +76,11 @@ export function applyDeviceModeUi({
 
   body?.setAttribute('data-device-mode', deviceMode);
   mainApp?.setAttribute('data-device-mode', deviceMode);
+  // html 要素にも同じ属性を付与する。
+  // phone モードでは body を overflow-y:auto にしてスクロールさせるが、
+  // 親の html が overflow:hidden / height:100dvh のままだとスクロールが効かない。
+  // html:has() CSS セレクタは古い iOS Safari で未対応のため、JS で直接属性を付与する。
+  documentRef.documentElement?.setAttribute('data-device-mode', deviceMode);
 
   if (badge) {
     badge.textContent = getDeviceModeLabel(deviceMode);

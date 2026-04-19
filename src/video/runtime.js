@@ -223,6 +223,45 @@ export function getAnalysisFrameGate({
   };
 }
 
+/**
+ * Pre-draw gate: checks only readyState and paused state.
+ * Call this BEFORE drawImage() so we avoid an unnecessary canvas write when
+ * the media is not yet ready or is paused.
+ *
+ * Returns true when the frame should be skipped (caller must call scheduleNext
+ * and return without drawing or calling detectForVideo).
+ */
+/**
+ * Pre-draw gate: checks readyState and paused/ended state.
+ *
+ * Returns an object:
+ *   { skip: false }                – proceed with drawImage + detectForVideo
+ *   { skip: true, ended: false }   – video paused but still alive; reschedule
+ *   { skip: true, ended: true }    – video ended; caller should stop analysis
+ *
+ * "ended" is set to true only when the video is in the ended state (video mode).
+ * This lets processFrame distinguish between a normal pause (reschedule) and a
+ * true end-of-stream (stop analysis via stopAllProcessing).
+ */
+export function shouldSkipPreDraw({ readyState, isVideoMode, isPaused, isEnded = false }) {
+  if (readyState < 2) return { skip: true, ended: false };
+  if (isVideoMode && isEnded) return { skip: true, ended: true };
+  if (isVideoMode && isPaused) return { skip: true, ended: false };
+  return { skip: false, ended: false };
+}
+
+/**
+ * Post-draw gate: checks only the monotonic timestamp requirement.
+ * Call this AFTER drawImage(), using the timestamp captured right after
+ * drawImage completes (detectTimestamp).
+ *
+ * Returns true when the frame should be skipped because detectTimestamp is
+ * not strictly greater than lastMpTimestamp (video hasn't advanced).
+ */
+export function shouldSkipPostDraw({ isVideoMode, detectTimestamp, lastMpTimestamp }) {
+  if (isVideoMode && detectTimestamp <= lastMpTimestamp) return true;
+  return false;
+}
 
 export function scheduleAnalysisFrame({
   isAnalyzing,

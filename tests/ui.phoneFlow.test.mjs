@@ -204,6 +204,52 @@ test('applyPhoneFlowUi hides meta when showMeta is false', () => {
   assert.equal(toggleButton.style.display, 'none');
 });
 
+test('getPhoneFlowState shows results view even when analysisData is empty (0 landmarks detected)', () => {
+  // 解析データが0件でも currentView=results なら results ビューを表示する。
+  // ランドマーク未検出（矢状面解析で人物が映っていない等）でも
+  // capture ビューに戻らないことを確認する。
+  const stateNoData = getPhoneFlowState({
+    deviceMode: 'phone',
+    currentView: 'results',
+    hasAnalysisData: false,
+    isAnalyzing: false,
+    analysisPoints: 0,
+    stepCount: 0
+  });
+  assert.equal(stateNoData.view, 'results', 'should stay on results view even with no data');
+  assert.equal(stateNoData.showMeta, false, 'meta should be hidden when no data');
+  assert.equal(stateNoData.quickActionsVisible, false, 'quick actions hidden when no data');
+  assert.equal(stateNoData.chartsVisible, false, 'charts hidden when no data');
+  assert.equal(stateNoData.toggleEnabled, true, 'toggle back button always enabled in results');
+  assert.ok(stateNoData.message.includes('解析データが取得できませんでした'), 'should show error message when no data');
+});
+
+test('getPhoneFlowState hides canvas-container when video file is loaded (capture view)', () => {
+  // 動画ファイルあり → captureSurfaceVisible=false（canvas-containerを非表示）
+  const stateWithVideo = getPhoneFlowState({
+    deviceMode: 'phone',
+    currentView: 'capture',
+    hasAnalysisData: false,
+    isAnalyzing: false,
+    analysisPoints: 0,
+    stepCount: 0,
+    hasVideoFile: true
+  });
+  assert.equal(stateWithVideo.captureSurfaceVisible, false, 'video file loaded: canvas-container should be hidden');
+
+  // 動画ファイルなし → captureSurfaceVisible=true（canvas-containerを表示）
+  const stateNoVideo = getPhoneFlowState({
+    deviceMode: 'phone',
+    currentView: 'capture',
+    hasAnalysisData: false,
+    isAnalyzing: false,
+    analysisPoints: 0,
+    stepCount: 0,
+    hasVideoFile: false
+  });
+  assert.equal(stateNoVideo.captureSurfaceVisible, true, 'no video file: canvas-container should be visible');
+});
+
 test('getPhoneQuickActionDisabledState normalizes disabled flags', () => {
   assert.deepEqual(
     getPhoneQuickActionDisabledState({
