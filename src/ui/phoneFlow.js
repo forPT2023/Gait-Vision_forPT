@@ -4,12 +4,15 @@ export function getPhoneFlowState({
   hasAnalysisData = false,
   isAnalyzing = false,
   analysisPoints = 0,
-  stepCount = 0
+  stepCount = 0,
+  hasVideoFile = false
 } = {}) {
   const visible = deviceMode === 'phone';
+  // currentView === 'results' であれば hasAnalysisData に関わらず results を表示する。
+  // （解析データが 0 件の場合も results ビューに留まり、エラーメッセージを表示する）
   const normalizedView = isAnalyzing
     ? 'analyzing'
-    : (currentView === 'results' && hasAnalysisData ? 'results' : 'capture');
+    : (currentView === 'results' ? 'results' : 'capture');
   const chartsVisible = visible ? normalizedView === 'results' : true;
 
   if (!visible) {
@@ -32,6 +35,10 @@ export function getPhoneFlowState({
     return {
       visible: true,
       view: normalizedView,
+      // 解析中は canvas-container は非表示のままにする（UI 上の一貫性を維持）。
+      // canvas サイズの保証は startAnalysis() 側のフォールバックで行う:
+      //   canvasElement.width/height が 0 の場合は videoElement の native 解像度を使って
+      //   直接 canvasElement のサイズを設定する。
       captureSurfaceVisible: false,
       stageLabel: '解析中',
       metaLabel: `点:${Math.max(0, analysisPoints)} 歩:${Math.max(0, stepCount)}`,
@@ -50,20 +57,27 @@ export function getPhoneFlowState({
       view: normalizedView,
       captureSurfaceVisible: false,
       stageLabel: '結果',
-      metaLabel: `点:${Math.max(0, analysisPoints)} 歩:${Math.max(0, stepCount)}`,
-      showMeta: true,
-      quickActionsVisible: true,
-      chartsVisible: true,
+      metaLabel: hasAnalysisData
+        ? `点:${Math.max(0, analysisPoints)} 歩:${Math.max(0, stepCount)}`
+        : '',
+      showMeta: hasAnalysisData,
+      quickActionsVisible: hasAnalysisData,
+      chartsVisible: hasAnalysisData,
       toggleEnabled: true,
       toggleLabel: '🎥 撮影に戻る',
-      message: '結果を確認・出力できます。'
+      message: hasAnalysisData
+        ? '結果を確認・出力できます。'
+        : '解析データが取得できませんでした。動画に人物が映っているか確認してください。'
     };
   }
 
+  // 動画ファイルが読み込まれている場合は canvas-container（「モバイル最適表示」）を隠す。
+  // 動画ファイルモードでは解析前も解析後も phone-original-preview / phone-analyzed-preview
+  // が動画表示の役割を担うため、canvas-container は不要。
   return {
     visible: true,
     view: normalizedView,
-    captureSurfaceVisible: true,
+    captureSurfaceVisible: !hasVideoFile,
     stageLabel: '取得',
     metaLabel: hasAnalysisData
       ? `前回 点:${Math.max(0, analysisPoints)} 歩:${Math.max(0, stepCount)}`

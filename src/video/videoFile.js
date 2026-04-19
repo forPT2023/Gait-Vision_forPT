@@ -82,10 +82,14 @@ export function waitForVideoLoad({ videoElement, src, timeoutMs = 30000, logger 
 
     let pollInterval = null;
     const hasRenderableFrame = () => {
-      const hasDimensions = videoElement.videoWidth > 0 && videoElement.videoHeight > 0;
-      const hasDecodedFrame = videoElement.readyState >= 2;
-      const hasFiniteDuration = Number.isFinite(videoElement.duration) && videoElement.duration > 0;
-      return hasDimensions || (hasDecodedFrame && hasFiniteDuration);
+      // readyState >= 2 (HAVE_CURRENT_DATA) means the browser has decoded at
+      // least one frame and drawImage/createImageBitmap will return real pixels.
+      // videoWidth > 0 alone (readyState=1 / HAVE_METADATA) is NOT sufficient —
+      // drawing at that stage returns a black frame.
+      // We still accept readyState=2 even when videoWidth/videoHeight are 0
+      // (can happen on some mobile browsers that report dimensions later) because
+      // the decoder has the first frame ready.
+      return videoElement.readyState >= 2;
     };
 
     const done = (eventName) => {

@@ -39,26 +39,8 @@ function formatAnalysisCsvRow(dataPoint = {}) {
   ].join(',');
 }
 
-export function buildSessionExport({
-  sessions = [],
-  exportDate = new Date().toISOString(),
-  version = APP_VERSION_LABEL
-}) {
-  const normalizedSessions = Array.isArray(sessions) ? sessions : [];
-  return {
-    exportDate,
-    version,
-    totalSessions: normalizedSessions.length,
-    sessions: normalizedSessions
-  };
-}
-
 export function formatCompactDate({ date = new Date() } = {}) {
   return date.toISOString().split('T')[0].replace(/-/g, '');
-}
-
-export function createBackupFilename({ date = new Date() } = {}) {
-  return `gait_backup_${formatCompactDate({ date })}.json`;
 }
 
 export function buildCsvExportFilename({ patientId, date = new Date() }) {
@@ -119,21 +101,56 @@ export function downloadBlobFile({
   }
 }
 
-export function downloadJson({
-  documentRef = globalThis.document,
+/**
+ * デバイスに応じた最適な方法でファイルを保存する。
+ *
+ * - iOS Safari: <a download> が無視される。Web Share API 経由で「ファイルに保存」等を案内。
+ * - Android/Desktop: まず <a download>.click() で直接ダウンロード。
+ *   Web Share API があっても強制的に共有シートには飛ばさない（UX 上不便なため）。
+ *
+ * @param {object} params
+ * @param {Blob}     params.blob
+ * @param {string}   params.filename
+ * @param {boolean}  [params.forceShare=false]  - true のときのみ iOS 以外でも共有シートを使う
+ * @param {URL}      [params.URLRef]
+ * @param {Document} [params.documentRef]
+ * @param {Navigator} [params.navigatorRef]
+ * @param {number}   [params.revokeDelayMs]
+ * @returns {Promise<'shared'|'downloaded'>}
+ */
+export async function shareOrDownloadBlob({
+  blob,
+  filename,
+  forceShare = false,
   URLRef = globalThis.URL,
-  BlobRef = globalThis.Blob,
-  payload,
-  filename = 'export.json'
+  documentRef = globalThis.document,
+  navigatorRef = globalThis.navigator,
+  revokeDelayMs = 0
 }) {
-  if (typeof BlobRef !== 'function') {
-    throw new Error('Blob API is unavailable');
+  if (blob == null) throw new Error('Blob payload is required');
+  const normalizedFilename = String(filename ?? '').trim();
+  if (!normalizedFilename) throw new Error('Filename is required');
+
+  // iOS Safari 判定: <a download> がほぼ機能しないため Web Share API を使う
+  const ua = (navigatorRef?.userAgent ?? '');
+  const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+    ((navigatorRef?.platform ?? '') === 'MacIntel' && (navigatorRef?.maxTouchPoints ?? 0) > 1);
+
+  const canUseShare =
+    typeof navigatorRef?.canShare === 'function' &&
+    typeof navigatorRef?.share === 'function';
+
+  // iOS: Web Share API を優先（<a download> が機能しないため）
+  // その他: forceShare=true のときのみ共有シートを使う（通常はダウンロード）
+  if (canUseShare && (isIOS || forceShare)) {
+    const file = new File([blob], normalizedFilename, { type: blob.type || 'application/octet-stream' });
+    if (navigatorRef.canShare({ files: [file] })) {
+      await navigatorRef.share({ files: [file], title: normalizedFilename });
+      return 'shared';
+    }
   }
-  const blob = new BlobRef([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  downloadBlobFile({
-    blob,
-    filename,
-    URLRef,
-    documentRef
-  });
+
+  // 通常のダウンロード（Android / Desktop / iOS でShare失敗した場合）
+  downloadBlobFile({ blob, filename: normalizedFilename, URLRef, documentRef, revokeDelayMs });
+  return 'downloaded';
 }

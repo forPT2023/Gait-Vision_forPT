@@ -115,9 +115,11 @@ test('buildReportHtml renders 未計算 for unavailable metrics', () => {
 
   assert.ok(html.includes('未計算'));
   assert.ok(html.includes('⚪ 未計算'));
-  // 矢状面では関節角度詳細テーブルを表示する（棒グラフは削除済み）
+  // 矢状面では関節角度詳細テーブルを表示する
   assert.ok(html.includes('関節角度詳細'), '矢状面レポートに関節角度詳細テーブルが含まれる必要がある');
-  assert.ok(!html.includes('report-knee-chart'), '矢状面レポートに棒グラフは不要');
+  // 矢状面では関節角度グラフセクション（棒グラフcanvas）を表示する
+  assert.ok(html.includes('report-knee-chart'), '矢状面レポートに膝関節グラフcanvasが含まれる必要がある');
+  assert.ok(html.includes('report-hip-chart'), '矢状面レポートに股関節グラフcanvasが含まれる必要がある');
 });
 
 test('buildPdfImageLayout creates multipage placements for tall canvases', () => {

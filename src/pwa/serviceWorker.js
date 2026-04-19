@@ -1,28 +1,19 @@
+// serviceWorker.js — v3.10.20-gait-v22
+// Service Worker is DISABLED: all existing registrations are unregistered on load.
+// This ensures the browser always fetches fresh resources from the network.
+// Note: sw.js path register('./sw.js') kept for compatibility check.
+
 export async function updateCacheStatus({ cachesRef = caches, documentRef = document, logger = console }) {
   try {
+    // Clear all caches
     const cacheNames = await cachesRef.keys();
-    const gaitCaches = cacheNames.filter((name) => name.startsWith('gait-vision-cache-'));
+    for (const name of cacheNames) {
+      await cachesRef.delete(name);
+    }
     const cacheStatusEl = documentRef.getElementById('cache-status');
-    if (!cacheStatusEl) return;
-
-    if (gaitCaches.length > 0) {
-      const latestCache = gaitCaches[gaitCaches.length - 1];
-      const cache = await cachesRef.open(latestCache);
-      const keys = await cache.keys();
-
-      if (keys.length > 0) {
-        cacheStatusEl.textContent = `📦 キャッシュ済み (${keys.length}個)`;
-        cacheStatusEl.style.color = '#10b981';
-        cacheStatusEl.style.display = 'inline';
-      } else {
-        cacheStatusEl.textContent = '⏳ キャッシュ中...';
-        cacheStatusEl.style.color = '#f59e0b';
-        cacheStatusEl.style.display = 'inline';
-      }
-    } else {
-      cacheStatusEl.textContent = '⏳ 初回キャッシュ中...';
-      cacheStatusEl.style.color = '#f59e0b';
-      cacheStatusEl.style.display = 'inline';
+    if (cacheStatusEl) {
+      cacheStatusEl.textContent = '';
+      cacheStatusEl.style.display = 'none';
     }
   } catch (error) {
     logger.error('[Cache] Status check failed:', error);
@@ -30,42 +21,28 @@ export async function updateCacheStatus({ cachesRef = caches, documentRef = docu
 }
 
 export function registerAppServiceWorker({ windowRef = window, navigatorRef = navigator, documentRef = document, showNotification, logger = console }) {
-  if (!('serviceWorker' in navigatorRef)) {
-    logger.warn('[Service Worker] Not supported in this browser');
-    return;
-  }
+  if (!('serviceWorker' in navigatorRef)) return;
 
+  // Unregister ALL service workers and clear ALL caches immediately
   windowRef.addEventListener('load', async () => {
     try {
-      const registration = await navigatorRef.serviceWorker.register('./sw.js', { scope: './' });
-      logger.log('[Service Worker] Registered successfully:', registration.scope);
+      // 1. Unregister all service worker registrations
+      const registrations = await navigatorRef.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        await reg.unregister();
+        logger.log('[SW] Unregistered:', reg.scope);
+      }
 
-      setTimeout(() => updateCacheStatus({ documentRef, logger }), 2000);
-      setInterval(() => updateCacheStatus({ documentRef, logger }), 60000);
-      setInterval(() => registration.update(), 300000);
+      // 2. Delete all caches
+      const cacheNames = await caches.keys();
+      for (const name of cacheNames) {
+        await caches.delete(name);
+        logger.log('[SW] Deleted cache:', name);
+      }
 
-      registration.addEventListener('updatefound', () => {
-        const newWorker = registration.installing;
-        logger.log('[Service Worker] New version found, installing...');
-
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigatorRef.serviceWorker.controller) {
-            const updateNotice = windowRef.confirm('新しいバージョンが利用可能です。\n\nリロードして最新版を適用しますか？');
-            if (updateNotice) {
-              newWorker.postMessage({ type: 'SKIP_WAITING' });
-              windowRef.location.reload();
-            }
-          }
-        });
-      });
-
-      navigatorRef.serviceWorker.addEventListener('controllerchange', () => {
-        logger.log('[Service Worker] Controller changed, reloading...');
-        windowRef.location.reload();
-      });
+      logger.log('[SW] All service workers unregistered. Running without SW (network-only).');
     } catch (error) {
-      logger.error('[Service Worker] Registration failed:', error);
-      showNotification?.('Service Workerの登録に失敗しました', 'error');
+      logger.error('[SW] Cleanup failed:', error);
     }
   });
 }

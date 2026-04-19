@@ -34,11 +34,23 @@ export function calcJointAngles(worldLandmarks) {
   };
 }
 
-export function calcTrunkAngle(worldLandmarks, logger = console) {
-  if (!worldLandmarks || worldLandmarks.length < 33) {
-    logger.warn?.('[Trunk] Invalid world landmarks (length:', worldLandmarks ? worldLandmarks.length : 'null', ')');
-    return 0;
-  }
+/**
+ * calcTrunkAngle – 体幹傾斜角度を撮影平面に応じて計算する。
+ *
+ * 前額面（frontal）: カメラが正面を向いているため X-Y 平面での左右側方傾斜を計算。
+ *   肩中点→股関節中点 ベクトルの X 成分（左右）と Y 成分（上下）からatan2。
+ *   Trendelenburg 的な体幹の左右傾きを反映する。
+ *
+ * 矢状面（sagittal）: カメラが側面を向いているため Y-Z 平面での前後傾を計算。
+ *   肩中点→股関節中点 ベクトルの Z 成分（前後）と Y 成分（上下）からatan2。
+ *   体幹前傾・後傾を反映する。
+ *
+ * @param {Array} worldLandmarks - MediaPipe world landmarks
+ * @param {'frontal'|'sagittal'} plane - 撮影平面
+ * @returns {number} 傾斜角度 (°)、0以上
+ */
+export function calcTrunkAngle(worldLandmarks, plane = 'frontal') {
+  if (!worldLandmarks || worldLandmarks.length < 33) return 0;
 
   const shoulderMid = {
     x: (worldLandmarks[LM.LEFT_SHOULDER].x + worldLandmarks[LM.RIGHT_SHOULDER].x) / 2,
@@ -51,25 +63,53 @@ export function calcTrunkAngle(worldLandmarks, logger = console) {
     z: (worldLandmarks[LM.LEFT_HIP].z + worldLandmarks[LM.RIGHT_HIP].z) / 2
   };
 
-  const dy = hipMid.y - shoulderMid.y;
-  const dz = shoulderMid.z - hipMid.z;
-  const angle = Math.abs(Math.atan2(dz, dy) * (180 / Math.PI));
+  // 肩→股関節 の「上下幅」（絶対値）を基準軸として使用。
+  // MediaPipe world coords では Y軸下向き正（腰が原点、肩は腰より上=Y負値）のため、
+  // shoulderMid.y < hipMid.y となり dy = shoulderMid.y - hipMid.y が負値になる。
+  // atan2(offset, dy) に負の dy を渡すと ~180° になるため、|dy| を使用して
+  // 「体幹の縦方向の距離」を正値として扱う。
+  const absVertical = Math.abs(shoulderMid.y - hipMid.y);
+  let angle;
 
-  if (Math.random() < 0.01) {
-    logger.log?.('[Trunk] dy:', dy.toFixed(4), '| dz:', dz.toFixed(4), '| angle:', angle.toFixed(2), '°');
+  if (plane === 'sagittal') {
+    // 矢状面: 前後傾を計算（Y-Z 平面）。
+    // dz = shoulderMid.z - hipMid.z
+    //   dz > 0 → 肩が股より前方（体幹前傾）
+    //   dz < 0 → 肩が股より後方（体幹後傾）
+    // atan2(dz, absVertical): absVertical > 0 なので角度は ±90° 以内に収まる。
+    // 傾き角度 = |atan2(dz, |縦距離|)|
+    const dz = shoulderMid.z - hipMid.z;
+    angle = Math.abs(Math.atan2(dz, absVertical) * (180 / Math.PI));
+  } else {
+    // 前額面: 左右側方傾斜を計算（X-Y 平面）。
+    // dx = shoulderMid.x - hipMid.x
+    //   dx ≠ 0 → 体幹が左右に傾いている（Trendelenburg 的動揺）
+    // atan2(dx, absVertical): 直立時 dx≈0 → angle≈0°、左右傾き時に角度増大。
+    const dx = shoulderMid.x - hipMid.x;
+    angle = Math.abs(Math.atan2(dx, absVertical) * (180 / Math.PI));
   }
 
   return Number.isFinite(angle) ? angle : 0;
 }
 
-export function calcPelvicTilt(worldLandmarks) {
+export function calcPelvicTilt(worldLandmarks, plane = 'frontal') {
   if (!worldLandmarks || worldLandmarks.length < 33) return 0;
   const dy = worldLandmarks[LM.RIGHT_HIP].y - worldLandmarks[LM.LEFT_HIP].y;
+  if (plane === 'sagittal') {
+    // 矢状面（側面撮影）: 骨盤前後傾を Y-Z 平面で計算
+    // 左右 HIP は奥行き方向（Z）に並ぶ。前側 HIP が上（Y小）になると前傾
+    // |dz| を使うことで左右どちらのHIPがカメラ側でも符号に依存しない角度を得る
+    const dz = worldLandmarks[LM.RIGHT_HIP].z - worldLandmarks[LM.LEFT_HIP].z;
+    const absDz = Math.abs(dz);
+    if (absDz < 1e-6) return 0; // 奥行き差がほぼゼロ（正面向き）は計算不能
+    return Math.abs(Math.atan2(dy, absDz) * (180 / Math.PI));
+  }
+  // 前額面（正面撮影）: 骨盤左右傾斜を X-Y 平面で計算
   const dx = worldLandmarks[LM.RIGHT_HIP].x - worldLandmarks[LM.LEFT_HIP].x;
   return Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
 }
 
-export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT, logger = console) {
+export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT, logger = null) {
   if (!worldLandmarks || !previousWorldLandmarks || !deltaT || deltaT <= 0 || worldLandmarks.length < 33 || previousWorldLandmarks.length < 33) {
     return 0;
   }
@@ -124,12 +164,8 @@ export function calcWalkingSpeed(worldLandmarks, previousWorldLandmarks, deltaT,
   const scaledDisplacement = (displacementXZ / bodyScale) * 0.4;
   const speedMps = scaledDisplacement / (deltaT / 1000);
 
-  if (Math.random() < 0.01) {
-    logger.log?.('[Speed] hipDispXZ:', hipDisplacementXZ.toFixed(5), '| ankleDispXZ:', ankleDisplacementXZ.toFixed(5), '| usedDispXZ:', displacementXZ.toFixed(5), '| bodyScale:', bodyScale.toFixed(3), '| scaled:', scaledDisplacement.toFixed(5), 'm | deltaT:', deltaT.toFixed(1), 'ms | speed:', speedMps.toFixed(3), 'm/s');
-  }
-
-  if (Number.isNaN(speedMps) || speedMps < 0 || speedMps > 5) {
-    logger.warn?.('[Speed] Out of range:', speedMps.toFixed(3), 'm/s | hipDispXZ:', hipDisplacementXZ.toFixed(4), '| ankleDispXZ:', ankleDisplacementXZ.toFixed(4), '| usedDispXZ:', displacementXZ.toFixed(4), '| bodyScale:', bodyScale.toFixed(3), '| deltaT:', deltaT.toFixed(1), 'ms');
+  if (Number.isNaN(speedMps) || !Number.isFinite(speedMps) || speedMps < 0 || speedMps > 5) {
+    if (Number.isNaN(speedMps) || !Number.isFinite(speedMps)) return 0;
     return Math.max(0, Math.min(5, speedMps));
   }
 
@@ -150,75 +186,503 @@ export function calcSymmetryIndex(left, right) {
   return Math.max(0, Math.min(100, symmetry));
 }
 
-/**
- * 前額面用: 歩行イベント（ヒールストライク）の左右インターバル比から対称性を算出。
- * 左右交互のヒールストライク間隔を比較し、差が小さいほど100に近い値を返す。
- * イベントが不足している場合は100（判定不能＝問題なし）を返す。
- */
 export function calcStepSymmetry(gaitEvents) {
   if (!Array.isArray(gaitEvents) || gaitEvents.length < 4) return 100;
 
-  // 直近8イベントのインターバルを収集
   const recent = gaitEvents.slice(-8);
-  const intervals = [];
-  for (let i = 1; i < recent.length; i++) {
-    const dt = recent[i].timestamp - recent[i - 1].timestamp;
-    if (dt > 0 && dt < 2000) intervals.push(dt);
+
+  // event.type（left_heel_strike / right_heel_strike）で左右を明示的に分けて
+  // それぞれの平均ステップ間隔を求め対称性を計算する。
+  // 以前は奇数/偶数インデックスで分けていたため、左右が連続検出された場合などに
+  // 誤った対称性が計算されていた。
+  const leftIntervals = [];
+  const rightIntervals = [];
+  let lastLeftTs = null;
+  let lastRightTs = null;
+
+  for (const event of recent) {
+    if (event.type === 'left_heel_strike') {
+      if (lastLeftTs !== null) {
+        const dt = event.timestamp - lastLeftTs;
+        if (dt > 100 && dt < 4000) leftIntervals.push(dt);
+      }
+      lastLeftTs = event.timestamp;
+    } else if (event.type === 'right_heel_strike') {
+      if (lastRightTs !== null) {
+        const dt = event.timestamp - lastRightTs;
+        if (dt > 100 && dt < 4000) rightIntervals.push(dt);
+      }
+      lastRightTs = event.timestamp;
+    }
   }
-  if (intervals.length < 2) return 100;
 
-  // 奇数インデックス（左→右）と偶数インデックス（右→左）の平均インターバルを比較
-  const odd  = intervals.filter((_, i) => i % 2 === 0);
-  const even = intervals.filter((_, i) => i % 2 === 1);
-  if (odd.length === 0 || even.length === 0) return 100;
+  // 左右それぞれ1区間以上必要
+  if (leftIntervals.length === 0 || rightIntervals.length === 0) {
+    // フォールバック: 旧来の隣接イベント間隔ベース（左右情報なし）
+    const intervals = [];
+    for (let i = 1; i < recent.length; i++) {
+      const dt = recent[i].timestamp - recent[i - 1].timestamp;
+      if (dt > 0 && dt < 2000) intervals.push(dt);
+    }
+    if (intervals.length < 2) return 100;
+    const odd  = intervals.filter((_, i) => i % 2 === 0);
+    const even = intervals.filter((_, i) => i % 2 === 1);
+    if (odd.length === 0 || even.length === 0) return 100;
+    const avgOdd  = odd.reduce((s, v) => s + v, 0) / odd.length;
+    const avgEven = even.reduce((s, v) => s + v, 0) / even.length;
+    return calcSymmetryIndex(avgOdd, avgEven);
+  }
 
-  const avgOdd  = odd.reduce((s, v) => s + v, 0) / odd.length;
-  const avgEven = even.reduce((s, v) => s + v, 0) / even.length;
-  return calcSymmetryIndex(avgOdd, avgEven);
+  const avgLeft  = leftIntervals.reduce((s, v) => s + v, 0) / leftIntervals.length;
+  const avgRight = rightIntervals.reduce((s, v) => s + v, 0) / rightIntervals.length;
+  return calcSymmetryIndex(avgLeft, avgRight);
 }
 
-export function detectGaitEvent({ landmarks, prevLandmarks, timestamp, lastHeelStrikeTime, logger = console, minIntervalMs = 250 }) {
-  if (!landmarks || landmarks.length < 33 || !prevLandmarks || prevLandmarks.length < 33) {
-    return { event: null, nextLastHeelStrikeTime: lastHeelStrikeTime, stepIncrement: 0 };
+/**
+ * detectGaitEvent – EMA平滑化 + state‑machine + swing‑phase方式（v7）
+ *
+ * 設計方針（v7）:
+ *  MediaPipe worldLandmarks.y は「上向き正」座標系（腰が原点、踵は下方向）:
+ *    接地時踵Y ≈ +0.75〜+0.85m (正の大きな値)
+ *    スウィング最高点踵Y ≈ +0.60〜+0.70m (正の小さな値)
+ *  ※ Y反転は不要。生値をそのまま使用する。
+ *
+ *  1. EMA（α=0.4）で踵Y座標をフレームごとに平滑化し、ノイズを除去する。
+ *  2. EMA差分で state 更新（閾値 0.002m）:
+ *     d < 0 → 'down'（踵上昇中＝スウィング）
+ *     d > 0 → 'up' （踵下降中＝接地方向）
+ *  3. UP → non‑UP（'stable' または 'down'）遷移 = ヒールストライク候補。
+ *  4. hadDownPhase チェック（静止時誤検出防止）:
+ *     直前のイベント以降に 'down'（踵上昇=スウィング）フェーズを経たかどうかを記録。
+ *     これは絶対閾値ではなく状態遷移で判断するため、患者の体格や歩容に依存しない。
+ *     ただし初回ステップ（eventsL/R が 0）はdownフェーズなしでも検出を許可。
+ *  5. heelHigh チェック: 現在EMA踵Y > HEEL_HIGH_THR で接地を確認。
+ *  6. minIntervalMs（デフォルト400ms）で左右それぞれ独立に連続検出を防ぐ。
+ *  7. worldLandmarks が null の場合は 2D 正規化ランドマークにフォールバック。
+ *
+ * 外部から渡すべき持ち越し状態:
+ *   leftHeelState / rightHeelState: 'stable'|'down'|'up'
+ *   emaLeftHeelY / emaRightHeelY: EMAフィルタの前フレーム値
+ *   leftSwingPeak / rightSwingPeak: スウィング中の踵Y最小値（デバッグ用、null=未検出）
+ *   leftEventCount / rightEventCount: 検出済みイベント数（初回判定に使用）
+ *   leftHadDownPhase / rightHadDownPhase: 前回検出以降にdownフェーズを経たか
+ */
+export function detectGaitEvent({
+  landmarks, prevLandmarks,
+  worldLandmarks,
+  timestamp,
+  lastHeelStrikeTime      = 0,
+  lastLeftHeelStrikeTime  = 0,
+  lastRightHeelStrikeTime = 0,
+  leftHeelState   = 'stable',
+  rightHeelState  = 'stable',
+  emaLeftHeelY    = null,   // EMA持ち越し値（null=未初期化）
+  emaRightHeelY   = null,
+  leftSwingPeak   = null,   // swing‑peak: デバッグ用（踵Y最小値）
+  rightSwingPeak  = null,
+  leftEventCount  = 0,      // 左足検出済みイベント数（初回判定）
+  rightEventCount = 0,
+  leftHadDownPhase  = false, // 前回検出以降に'down'フェーズを経たか
+  rightHadDownPhase = false,
+  logger = console,
+  minIntervalMs = 400
+}) {
+  // EMA alpha
+  const EMA_A = 0.4;
+  // state 遷移ノイズ閾値（EMA後）
+  const NOISE_THR = 0.002;
+  // 接地確認・スウィング確認 共通閾値（worldLandmarks.y: 下向き正、単位m）
+  // 接地時踵Y ≈ +0.75〜+0.85m、スウィング最高点 ≈ +0.60〜+0.65m
+  // ヒールストライク確認: emaY > HEEL_HIGH_THR（踵が地面近く）
+  // スウィング確認: swingPeak < HEEL_HIGH_THR（踵が十分上がっていた）
+  const HEEL_HIGH_THR = 0.70;
+
+  // ─── 早期リターン用デフォルト ────────────────────────────────────────────────
+  const noEvent = {
+    event: null,
+    nextLastHeelStrikeTime:      lastHeelStrikeTime,
+    nextLastLeftHeelStrikeTime:  lastLeftHeelStrikeTime,
+    nextLastRightHeelStrikeTime: lastRightHeelStrikeTime,
+    nextLeftHeelState:   leftHeelState,
+    nextRightHeelState:  rightHeelState,
+    nextEmaLeftHeelY:    emaLeftHeelY,
+    nextEmaRightHeelY:   emaRightHeelY,
+    nextLeftSwingPeak:    leftSwingPeak,
+    nextRightSwingPeak:   rightSwingPeak,
+    nextLeftEventCount:   leftEventCount,
+    nextRightEventCount:  rightEventCount,
+    nextLeftHadDownPhase:  leftHadDownPhase,
+    nextRightHadDownPhase: rightHadDownPhase,
+    stepIncrement: 0
+  };
+
+  if (!landmarks || landmarks.length < 33) return noEvent;
+
+  // ─── worldLandmarks EMA + state machine (v6) ────────────────────────────────
+  if (worldLandmarks && worldLandmarks.length >= 33) {
+    // MediaPipe worldLandmarks.y: 上向き正座標系（腰が原点、踵は下方向=正値）
+    // Y反転不要: 生値をそのまま使用
+    // 接地時: rawY ≈ +0.75〜+0.85m　スウィング時: rawY ≈ +0.60〜+0.65m
+    const rawLY = worldLandmarks[LM.LEFT_HEEL].y;
+    const rawRY = worldLandmarks[LM.RIGHT_HEEL].y;
+
+    // EMA初期化（初回フレームは生値をそのまま使う）
+    const curEmaL = (emaLeftHeelY  === null) ? rawLY : EMA_A * rawLY + (1 - EMA_A) * emaLeftHeelY;
+    const curEmaR = (emaRightHeelY === null) ? rawRY : EMA_A * rawRY + (1 - EMA_A) * emaRightHeelY;
+
+    // EMA差分で state 更新
+    // d < 0 → 踵上昇（スウィング） → 'down'
+    // d > 0 → 踵下降（接地方向）   → 'up'
+    // |d| ≤ NOISE_THR → 'stable'（踵が静止または微振動 = 接地フラット）
+    // ※ 以前は |d|≤NOISE_THR のとき前フレームの state を引き継いでいたが、
+    //   それだと 'up' に入った後、踵が地面に着いて静止しても 'up' のまま
+    //   UP→non-UP 遷移が永久に発火しないバグがあった。
+    //   'stable' に明示遷移することで 'up'→'stable' がヒールストライクとして検出される。
+    const dL = (emaLeftHeelY  === null) ? 0 : curEmaL - emaLeftHeelY;
+    const dR = (emaRightHeelY === null) ? 0 : curEmaR - emaRightHeelY;
+
+    let nextLS;
+    if      (dL < -NOISE_THR) nextLS = 'down';    // 踵上昇中（スウィング）
+    else if (dL >  NOISE_THR) nextLS = 'up';      // 踵下降中（接地方向）
+    else                      nextLS = 'stable';  // 静止/微振動（接地フラット）
+
+    let nextRS;
+    if      (dR < -NOISE_THR) nextRS = 'down';    // 踵上昇中（スウィング）
+    else if (dR >  NOISE_THR) nextRS = 'up';      // 踵下降中（接地方向）
+    else                      nextRS = 'stable';  // 静止/微振動（接地フラット）
+
+    // swing‑peak 更新: 'down'（踵上昇）フェーズのとき踵Y最小値（最も上がった位置）を追跡
+    // 'stable' 中も継続して最小値を追跡する（'down'→'stable' の連続フェーズをカバー）
+    let nSwPeakL = leftSwingPeak;
+    if (leftHeelState === 'down' || nextLS === 'down' || leftHeelState === 'stable' && nextLS === 'stable' && leftSwingPeak !== null) {
+      nSwPeakL = (leftSwingPeak === null) ? curEmaL : Math.min(leftSwingPeak, curEmaL);
+    }
+    let nSwPeakR = rightSwingPeak;
+    if (rightHeelState === 'down' || nextRS === 'down' || rightHeelState === 'stable' && nextRS === 'stable' && rightSwingPeak !== null) {
+      nSwPeakR = (rightSwingPeak === null) ? curEmaR : Math.min(rightSwingPeak, curEmaR);
+    }
+
+    // heelHigh: EMA後の踵が接地レベル（HEEL_HIGH_THR以上）
+    const leftHeelHigh  = curEmaL > HEEL_HIGH_THR;
+    const rightHeelHigh = curEmaR > HEEL_HIGH_THR;
+
+    // hadDownPhase: 前回検出以降に 'down'（踵上昇=スウィング）フェーズを経たか
+    // 絶対閾値ではなく状態遷移で判断するため、患者の体格や歩容に依存しない。
+    // 初回ステップ（eventCount=0）はdownフェーズなしでも検出を許可する。
+    const nextLHadDown = leftHadDownPhase  || (nextLS === 'down');
+    const nextRHadDown = rightHadDownPhase || (nextRS === 'down');
+    const hadSwingL = nextLHadDown || leftEventCount  === 0;
+    const hadSwingR = nextRHadDown || rightEventCount === 0;
+
+    // UP→non-UP 遷移の詳細デバッグ（毎フレーム）
+    if (leftHeelState === 'up' || nextLS === 'up') {
+      logger.log?.(`[GaitDBG-L] ts=${(timestamp/1000).toFixed(2)} prevSt=${leftHeelState} nextSt=${nextLS} emaL=${curEmaL.toFixed(3)} dL=${dL.toFixed(4)} heelHigh=${leftHeelHigh} hadSw=${hadSwingL} hadDn=${nextLHadDown} intv=${timestamp-lastLeftHeelStrikeTime}`);
+    }
+    if (rightHeelState === 'up' || nextRS === 'up') {
+      logger.log?.(`[GaitDBG-R] ts=${(timestamp/1000).toFixed(2)} prevSt=${rightHeelState} nextSt=${nextRS} emaR=${curEmaR.toFixed(3)} dR=${dR.toFixed(4)} heelHigh=${rightHeelHigh} hadSw=${hadSwingR} hadDn=${nextRHadDown} intv=${timestamp-lastRightHeelStrikeTime}`);
+    }
+
+    // 左: UP → non‑UP（踵下降が止まる = ヒールストライク）+ heelHigh + hadSwing + minInterval
+    if (leftHeelState === 'up' && nextLS !== 'up' && leftHeelHigh &&
+        hadSwingL && timestamp - lastLeftHeelStrikeTime > minIntervalMs) {
+      logger.log?.('[Gait] Left heel strike at', (timestamp / 1000).toFixed(2),
+        's | emaY=', curEmaL.toFixed(3), 'swingPeak=', nSwPeakL?.toFixed(3) ?? 'n/a');
+      return {
+        event: { type: 'left_heel_strike', timestamp },
+        nextLastHeelStrikeTime:      timestamp,
+        nextLastLeftHeelStrikeTime:  timestamp,
+        nextLastRightHeelStrikeTime: lastRightHeelStrikeTime,
+        nextLeftHeelState:   nextLS,
+        nextRightHeelState:  nextRS,
+        nextEmaLeftHeelY:    curEmaL,
+        nextEmaRightHeelY:   curEmaR,
+        nextLeftSwingPeak:    null,           // リセット（次スウィング待ち）
+        nextRightSwingPeak:   nSwPeakR,
+        nextLeftEventCount:   leftEventCount  + 1,
+        nextRightEventCount:  rightEventCount,
+        nextLeftHadDownPhase:  false,          // リセット（次downフェーズ待ち）
+        nextRightHadDownPhase: nextRHadDown,
+        stepIncrement: 1
+      };
+    }
+
+    // 右: UP → non‑UP（踵下降が止まる = ヒールストライク）+ heelHigh + hadSwing + minInterval
+    if (rightHeelState === 'up' && nextRS !== 'up' && rightHeelHigh &&
+        hadSwingR && timestamp - lastRightHeelStrikeTime > minIntervalMs) {
+      logger.log?.('[Gait] Right heel strike at', (timestamp / 1000).toFixed(2),
+        's | emaY=', curEmaR.toFixed(3), 'swingPeak=', nSwPeakR?.toFixed(3) ?? 'n/a');
+      return {
+        event: { type: 'right_heel_strike', timestamp },
+        nextLastHeelStrikeTime:      timestamp,
+        nextLastLeftHeelStrikeTime:  lastLeftHeelStrikeTime,
+        nextLastRightHeelStrikeTime: timestamp,
+        nextLeftHeelState:   nextLS,
+        nextRightHeelState:  nextRS,
+        nextEmaLeftHeelY:    curEmaL,
+        nextEmaRightHeelY:   curEmaR,
+        nextLeftSwingPeak:   nSwPeakL,
+        nextRightSwingPeak:  null,            // リセット（次スウィング待ち）
+        nextLeftEventCount:  leftEventCount,
+        nextRightEventCount: rightEventCount + 1,
+        nextLeftHadDownPhase:  nextLHadDown,
+        nextRightHadDownPhase: false,          // リセット（次downフェーズ待ち）
+        stepIncrement: 1
+      };
+    }
+
+    return {
+      ...noEvent,
+      nextLeftHeelState:   nextLS,
+      nextRightHeelState:  nextRS,
+      nextEmaLeftHeelY:    curEmaL,
+      nextEmaRightHeelY:   curEmaR,
+      nextLeftSwingPeak:   nSwPeakL,
+      nextRightSwingPeak:  nSwPeakR,
+      nextLeftHadDownPhase:  nextLHadDown,
+      nextRightHadDownPhase: nextRHadDown
+    };
   }
 
-  const leftHeelY = landmarks[LM.LEFT_HEEL].y;
+  // ─── フォールバック: 2D normalized landmarks ────────────────────────────────
+  if (!prevLandmarks || prevLandmarks.length < 33) return noEvent;
+
+  const leftHeelY  = landmarks[LM.LEFT_HEEL].y;
   const rightHeelY = landmarks[LM.RIGHT_HEEL].y;
-  const leftFootY = landmarks[LM.LEFT_FOOT_INDEX].y;
+  const leftFootY  = landmarks[LM.LEFT_FOOT_INDEX].y;
   const rightFootY = landmarks[LM.RIGHT_FOOT_INDEX].y;
-  const leftKneeY = landmarks[LM.LEFT_KNEE].y;
+  const leftKneeY  = landmarks[LM.LEFT_KNEE].y;
   const rightKneeY = landmarks[LM.RIGHT_KNEE].y;
-  const prevLeftHeelY = prevLandmarks[LM.LEFT_HEEL].y;
-  const prevRightHeelY = prevLandmarks[LM.RIGHT_HEEL].y;
+  const prevLHY    = prevLandmarks[LM.LEFT_HEEL].y;
+  const prevRHY    = prevLandmarks[LM.RIGHT_HEEL].y;
 
-  const leftHeelDown = leftHeelY > prevLeftHeelY;
-  const rightHeelDown = rightHeelY > prevRightHeelY;
-  const leftHeelLow = leftHeelY > leftKneeY + 0.05;
-  const rightHeelLow = rightHeelY > rightKneeY + 0.05;
-  const leftFootFlat = Math.abs(leftHeelY - leftFootY) < 0.05;
-  const rightFootFlat = Math.abs(rightHeelY - rightFootY) < 0.05;
+  // 2D: y増加=下降（画像座標系）
+  const NOISE_2D = 0.002;
+  const dL2D = leftHeelY  - prevLHY;
+  const dR2D = rightHeelY - prevRHY;
 
-  if (leftHeelDown && leftHeelLow && leftFootFlat && timestamp - lastHeelStrikeTime > minIntervalMs) {
-    logger.log?.('[Gait] Left heel strike at', (timestamp / 1000).toFixed(2), 's');
+  let nextLS2D;
+  if      (dL2D >  NOISE_2D) nextLS2D = 'down';
+  else if (dL2D < -NOISE_2D) nextLS2D = 'up';
+  else                        nextLS2D = 'stable';
+  let nextRS2D;
+  if      (dR2D >  NOISE_2D) nextRS2D = 'down';
+  else if (dR2D < -NOISE_2D) nextRS2D = 'up';
+  else                        nextRS2D = 'stable';
+
+  // 2D swing‑peak（2D Y: 下向き正なので 小さい値=高い位置 = min を追跡）
+  let nSwPeakL2D = leftSwingPeak;
+  if (leftHeelState === 'up' || nextLS2D === 'up') {
+    // 2D座標は下向き正なので最小値が最高点
+    nSwPeakL2D = (leftSwingPeak === null) ? leftHeelY : Math.min(leftSwingPeak, leftHeelY);
+  }
+  let nSwPeakR2D = rightSwingPeak;
+  if (rightHeelState === 'up' || nextRS2D === 'up') {
+    nSwPeakR2D = (rightSwingPeak === null) ? rightHeelY : Math.min(rightSwingPeak, rightHeelY);
+  }
+
+  // 2D hadDownPhase: 'down'フェーズを経たか追跡（2Dでは 'down'で墘下降=接地方向）
+  const nextLHadDown2D = leftHadDownPhase  || (nextLS2D === 'down');
+  const nextRHadDown2D = rightHadDownPhase || (nextRS2D === 'down');
+
+  const MIN_SWING_2D = 0.03; // 2D正規化座標でのスウィング最小振れ幅
+  const leftHeelLow2D  = leftHeelY  > leftKneeY  + 0.05;
+  const rightHeelLow2D = rightHeelY > rightKneeY + 0.05;
+  const leftFootFlat2D  = Math.abs(leftHeelY  - leftFootY)  < 0.10;
+  const rightFootFlat2D = Math.abs(rightHeelY - rightFootY) < 0.10;
+
+  // 2D swing‑peak: 2D座標でスウィング最低点（最小値）が十分低い（足が上がっていた）
+  const hadSwing2DL = (nSwPeakL2D !== null && leftHeelY - nSwPeakL2D > MIN_SWING_2D) || leftEventCount  === 0;
+  const hadSwing2DR = (nSwPeakR2D !== null && rightHeelY - nSwPeakR2D > MIN_SWING_2D) || rightEventCount === 0;
+
+  if (leftHeelState === 'down' && nextLS2D !== 'down' && leftHeelLow2D && leftFootFlat2D &&
+      hadSwing2DL && timestamp - lastLeftHeelStrikeTime > minIntervalMs) {
+    logger.log?.('[Gait] Left heel strike (2D) at', (timestamp / 1000).toFixed(2), 's');
     return {
       event: { type: 'left_heel_strike', timestamp },
-      nextLastHeelStrikeTime: timestamp,
+      nextLastHeelStrikeTime:      timestamp,
+      nextLastLeftHeelStrikeTime:  timestamp,
+      nextLastRightHeelStrikeTime: lastRightHeelStrikeTime,
+      nextLeftHeelState:   nextLS2D,
+      nextRightHeelState:  nextRS2D,
+      nextEmaLeftHeelY:    null,
+      nextEmaRightHeelY:   null,
+      nextLeftSwingPeak:   null,
+      nextRightSwingPeak:  nSwPeakR2D,
+      nextLeftEventCount:  leftEventCount  + 1,
+      nextRightEventCount: rightEventCount,
+      nextLeftHadDownPhase:  false,
+      nextRightHadDownPhase: nextRHadDown2D,
       stepIncrement: 1
     };
   }
-
-  if (rightHeelDown && rightHeelLow && rightFootFlat && timestamp - lastHeelStrikeTime > minIntervalMs) {
-    logger.log?.('[Gait] Right heel strike at', (timestamp / 1000).toFixed(2), 's');
+  if (rightHeelState === 'down' && nextRS2D !== 'down' && rightHeelLow2D && rightFootFlat2D &&
+      hadSwing2DR && timestamp - lastRightHeelStrikeTime > minIntervalMs) {
+    logger.log?.('[Gait] Right heel strike (2D) at', (timestamp / 1000).toFixed(2), 's');
     return {
       event: { type: 'right_heel_strike', timestamp },
-      nextLastHeelStrikeTime: timestamp,
+      nextLastHeelStrikeTime:      timestamp,
+      nextLastLeftHeelStrikeTime:  lastLeftHeelStrikeTime,
+      nextLastRightHeelStrikeTime: timestamp,
+      nextLeftHeelState:   nextLS2D,
+      nextRightHeelState:  nextRS2D,
+      nextEmaLeftHeelY:    null,
+      nextEmaRightHeelY:   null,
+      nextLeftSwingPeak:   nSwPeakL2D,
+      nextRightSwingPeak:  null,
+      nextLeftEventCount:  leftEventCount,
+      nextRightEventCount: rightEventCount + 1,
+      nextLeftHadDownPhase:  nextLHadDown2D,
+      nextRightHadDownPhase: false,
       stepIncrement: 1
     };
   }
 
-  return { event: null, nextLastHeelStrikeTime: lastHeelStrikeTime, stepIncrement: 0 };
+  return {
+    ...noEvent,
+    nextLeftHeelState:   nextLS2D,
+    nextRightHeelState:  nextRS2D,
+    nextLeftSwingPeak:   nSwPeakL2D,
+    nextRightSwingPeak:  nSwPeakR2D,
+    nextLeftHadDownPhase:  nextLHadDown2D,
+    nextRightHadDownPhase: nextRHadDown2D
+  };
 }
 
 export function ema(prev, cur, alpha = 0.2) {
   return alpha * cur + (1 - alpha) * prev;
+}
+
+/**
+ * KneePeakTracker – ストライドごとの膝関節ピーク値をリアルタイムで追跡するクラス。
+ *
+ * ─── 角度規約（重要）───────────────────────────────────────────────────────
+ *  calcAngle3D(hip, knee, ankle) の戻り値は「hip-knee-ankle の内角」である。
+ *    完全伸展（臨床0° flexion）→ hip-knee-ankle ≈ 175〜180°  （ほぼ直線）
+ *    最大屈曲（臨床60° flexion）→ hip-knee-ankle ≈ 115〜125°  （鋭角）
+ *
+ *  したがって:
+ *    臨床的屈曲角度(°) = 180° − 生角度(°)
+ *
+ *  ストライド内で:
+ *    生角度の MIN = 最も鋭角 = 最大屈曲（遊脚期ピーク）
+ *    生角度の MAX = 最も鈍角 = 最大伸展（立脚期ピーク）
+ *
+ *  正常値（臨床的屈曲角度に換算後）:
+ *    遊脚期最大屈曲: 55〜70° → 生角度110〜125°のMIN
+ *    立脚終期最小屈曲（最大伸展残存）: 5〜15° → 生角度165〜175°のMAX
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 注意:
+ *  - 「全フレーム平均」とは独立して動作する（EMAとは別のトラッカー）。
+ *  - ヒールストライクイベントが0または1回の場合はピーク未確定（null を返す）。
+ */
+export class KneePeakTracker {
+  constructor() {
+    // 現ストライド内の生角度追跡バッファ
+    // MIN = 最大屈曲の生角度候補（臨床値 = 180 - MIN）
+    // MAX = 最大伸展の生角度候補（臨床値 = 180 - MAX）
+    this._leftRawMin  = null;
+    this._leftRawMax  = null;
+    this._rightRawMin = null;
+    this._rightRawMax = null;
+
+    // 各ストライドの確定済み臨床値（°）を蓄積
+    // swingPeaks: 遊脚期最大屈曲(臨床°) = 180 - ストライド内MIN
+    // stanceMins: 立脚終期最小屈曲(臨床°) = 180 - ストライド内MAX
+    this._leftSwingPeaks  = [];
+    this._leftStanceMins  = [];
+    this._rightSwingPeaks = [];
+    this._rightStanceMins = [];
+  }
+
+  /**
+   * 毎フレーム呼び出し。
+   * @param {number|null} leftKnee   - 左膝生角度（hip-knee-ankle °, 完全伸展≈180°）
+   * @param {number|null} rightKnee  - 右膝生角度
+   * @param {object|null} gaitEvent  - 今フレームで検出されたヒールストライクイベント（または null）
+   */
+  update(leftKnee, rightKnee, gaitEvent) {
+    // ─── 現ストライドバッファに生角度を蓄積 ────────────────────────────────
+    if (typeof leftKnee === 'number' && leftKnee > 0) {
+      this._leftRawMin = (this._leftRawMin === null) ? leftKnee : Math.min(this._leftRawMin, leftKnee);
+      this._leftRawMax = (this._leftRawMax === null) ? leftKnee : Math.max(this._leftRawMax, leftKnee);
+    }
+    if (typeof rightKnee === 'number' && rightKnee > 0) {
+      this._rightRawMin = (this._rightRawMin === null) ? rightKnee : Math.min(this._rightRawMin, rightKnee);
+      this._rightRawMax = (this._rightRawMax === null) ? rightKnee : Math.max(this._rightRawMax, rightKnee);
+    }
+
+    // ─── ヒールストライクでストライド確定 ───────────────────────────────────
+    if (!gaitEvent) return;
+
+    if (gaitEvent.type === 'left_heel_strike') {
+      this._commitLeft();
+    } else if (gaitEvent.type === 'right_heel_strike') {
+      this._commitRight();
+    }
+  }
+
+  /** ストライド確定: 生MIN→遊脚屈曲臨床値、生MAX→立脚伸展臨床値 に変換して記録 */
+  _commitLeft() {
+    if (this._leftRawMin !== null) {
+      // 遊脚最大屈曲(臨床°) = 180 - 生MIN
+      this._leftSwingPeaks.push(180 - this._leftRawMin);
+    }
+    if (this._leftRawMax !== null) {
+      // 立脚最小屈曲(臨床°) = 180 - 生MAX（値が小さいほど伸展している）
+      this._leftStanceMins.push(180 - this._leftRawMax);
+    }
+    this._leftRawMin = null;
+    this._leftRawMax = null;
+  }
+
+  _commitRight() {
+    if (this._rightRawMin !== null) {
+      this._rightSwingPeaks.push(180 - this._rightRawMin);
+    }
+    if (this._rightRawMax !== null) {
+      this._rightStanceMins.push(180 - this._rightRawMax);
+    }
+    this._rightRawMin = null;
+    this._rightRawMax = null;
+  }
+
+  /**
+   * 各ストライドピークの中央値（平均より外れ値に強い）を返す。
+   * ストライドが1回も確定していない場合は null。
+   */
+  _median(arr) {
+    if (arr.length === 0) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+  }
+
+  /** 遊脚期最大屈曲の中央値（左）臨床° */
+  get leftSwingPeakMedian()  { return this._median(this._leftSwingPeaks); }
+  /** 遊脚期最大屈曲の中央値（右）臨床° */
+  get rightSwingPeakMedian() { return this._median(this._rightSwingPeaks); }
+  /** 立脚終期最小屈曲（最大伸展）の中央値（左）臨床° */
+  get leftStanceMinMedian()  { return this._median(this._leftStanceMins); }
+  /** 立脚終期最小屈曲（最大伸展）の中央値（右）臨床° */
+  get rightStanceMinMedian() { return this._median(this._rightStanceMins); }
+
+  /** 確定済みストライド数（左）*/
+  get leftStrideCount()  { return this._leftSwingPeaks.length; }
+  /** 確定済みストライド数（右）*/
+  get rightStrideCount() { return this._rightSwingPeaks.length; }
+
+  /** ピーク値サマリーを返す（ストライド未確定の場合は null）*/
+  getSummary() {
+    return {
+      leftSwingPeakMedian:  this.leftSwingPeakMedian,
+      leftStanceMinMedian:  this.leftStanceMinMedian,
+      rightSwingPeakMedian: this.rightSwingPeakMedian,
+      rightStanceMinMedian: this.rightStanceMinMedian,
+      leftStrideCount:  this.leftStrideCount,
+      rightStrideCount: this.rightStrideCount
+    };
+  }
 }

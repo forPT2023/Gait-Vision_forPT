@@ -63,10 +63,13 @@ function buildComments(summary) {
       addRuleComment(comments, commentRules.speedStrong);
     }
 
-    if (summary.avgSymmetry < thresholds.symmetry.lowBelow) {
-      addRuleComment(comments, commentRules.symmetryLow);
-    } else if (summary.avgSymmetry > thresholds.symmetry.strongAbove) {
-      addRuleComment(comments, commentRules.symmetryStrong);
+    // 対称性コメントは歩行イベント検出時のみ（未検出時は信頼できないため除外）
+    if (summary.metricAvailability.symmetry) {
+      if (summary.avgSymmetry < thresholds.symmetry.lowBelow) {
+        addRuleComment(comments, commentRules.symmetryLow);
+      } else if (summary.avgSymmetry > thresholds.symmetry.strongAbove) {
+        addRuleComment(comments, commentRules.symmetryStrong);
+      }
     }
 
     if (summary.avgTrunk > thresholds.trunk.elevatedAbove) {
@@ -79,10 +82,37 @@ function buildComments(summary) {
       addRuleComment(comments, commentRules.cadenceStrong);
     }
   } else {
-    if (summary.kneeDiff > thresholds.kneeDiff.elevatedAbove) {
-      addRuleComment(comments, commentRules.kneeDiffElevated);
+    // ─── 膝関節ピーク値コメント（KneePeakTracker が有効な場合のみ）──────────
+    const kp = summary.kneePeaks;
+    if (kp && (kp.leftStrideCount >= 2 || kp.rightStrideCount >= 2)) {
+      // 遊脚期最大屈曲ピーク（中央値）の評価
+      const leftPeak  = kp.leftSwingPeakMedian;
+      const rightPeak = kp.rightSwingPeakMedian;
+      const bothPeakAvail = leftPeak !== null && rightPeak !== null;
+      const anyPeakLow = (leftPeak !== null && leftPeak < thresholds.kneeSwingPeak.lowBelow) ||
+                         (rightPeak !== null && rightPeak < thresholds.kneeSwingPeak.lowBelow);
+      if (anyPeakLow) {
+        addRuleComment(comments, commentRules.kneeSwingPeakLow);
+      }
+      // 遊脚期ピーク左右差
+      if (bothPeakAvail && Math.abs(leftPeak - rightPeak) > thresholds.kneeSwingPeakDiff.elevatedAbove) {
+        addRuleComment(comments, commentRules.kneeSwingPeakDiffElevated);
+      }
+      // 立脚終期伸展不足（最小角度が大きすぎる）
+      const leftExt  = kp.leftStanceMinMedian;
+      const rightExt = kp.rightStanceMinMedian;
+      const extElevated = (leftExt !== null && leftExt > thresholds.kneeStanceExt.elevatedAbove) ||
+                          (rightExt !== null && rightExt > thresholds.kneeStanceExt.elevatedAbove);
+      if (extElevated) {
+        addRuleComment(comments, commentRules.kneeStanceExtElevated);
+      }
     } else {
-      addRuleComment(comments, commentRules.kneeDiffStable);
+      // ピーク値未確定時は平均値ベースのコメント
+      if (summary.kneeDiff > thresholds.kneeDiff.elevatedAbove) {
+        addRuleComment(comments, commentRules.kneeDiffElevated);
+      } else {
+        addRuleComment(comments, commentRules.kneeDiffStable);
+      }
     }
 
     if (summary.hipDiff > thresholds.hipDiff.elevatedAbove) {
@@ -96,6 +126,20 @@ function buildComments(summary) {
     if (summary.avgPelvis > thresholds.pelvis.elevatedAbove) {
       addRuleComment(comments, commentRules.pelvisElevated);
     }
+
+    // 矢状面でもケイデンスは比較的信頼性があるためコメントを出す
+    if (summary.avgCadence > 0) {
+      if (summary.avgCadence < thresholds.cadence.lowBelow) {
+        addRuleComment(comments, commentRules.cadenceLow);
+      } else if (summary.avgCadence > thresholds.cadence.strongAbove) {
+        addRuleComment(comments, commentRules.cadenceStrong);
+      }
+    }
+
+    // 歩行速度（矢状面では参考値として低速時のみ警告）
+    if (summary.avgSpeed > 0 && summary.avgSpeed < thresholds.speed.slowBelow) {
+      addRuleComment(comments, commentRules.speedSlow);
+    }
   }
 
   if (comments.length === 0) {
@@ -105,7 +149,7 @@ function buildComments(summary) {
   return comments;
 }
 
-export function createReportSummary({ analysisData, analysisPlane, currentPlane, patientId, stepCount, sessionTimestamp, captureMode = 'camera', totalProcessedFrames = analysisData.length, gaitEvents = [], appVersion = APP_VERSION_LABEL, sessionId }) {
+export function createReportSummary({ analysisData, analysisPlane, currentPlane, patientId, stepCount, sessionTimestamp, captureMode = 'camera', totalProcessedFrames = analysisData.length, gaitEvents = [], appVersion = APP_VERSION_LABEL, sessionId, kneePeaks = null }) {
   const reportPlane = analysisPlane || currentPlane;
   const avgSpeed = averageMetric(analysisData, 'speed', { excludeZero: true });
   const avgCadence = averageMetric(analysisData, 'cadence', { excludeZero: true });
@@ -121,7 +165,8 @@ export function createReportSummary({ analysisData, analysisPlane, currentPlane,
   const metricAvailability = {
     speed: countMetricValues(analysisData, 'speed', { excludeZero: true }) > 0,
     cadence: countMetricValues(analysisData, 'cadence', { excludeZero: true }) > 0,
-    symmetry: countMetricValues(analysisData, 'symmetry') > 0,
+    // 対称性は歩行イベントが検出されたときのみ「有効」とみなす
+    symmetry: gaitEvents.length > 0 && countMetricValues(analysisData, 'symmetry') > 0,
     trunk: countMetricValues(analysisData, 'trunk') > 0,
     leftKnee: countMetricValues(analysisData, 'leftKnee', { excludeZero: true }) > 0,
     rightKnee: countMetricValues(analysisData, 'rightKnee', { excludeZero: true }) > 0,
@@ -177,7 +222,17 @@ export function createReportSummary({ analysisData, analysisPlane, currentPlane,
     kneeDiff,
     hipDiff,
     ankleDiff,
-    thresholds: REPORT_THRESHOLDS[reportPlane]
+    thresholds: REPORT_THRESHOLDS[reportPlane],
+    // ── 膝関節ピーク値（KneePeakTracker より）──────────────────────────────
+    // kneePeaks は矢状面解析時のみ有効。ヒールストライクが1回以上検出された
+    // ストライドの中央値を使用。null の場合はピーク値未確定。
+    kneePeaks: kneePeaks || null,
+    // ── 股関節角度の計測方法注記 ────────────────────────────────────────────
+    // 現実装の股関節角度は「肩-股関節-膝」の3D角度であり、純粋な股関節
+    // 屈伸角度（骨盤-大腿骨）ではない。体幹前傾の影響を受けるため、
+    // 絶対値の臨床解釈には注意が必要。左右差（hipDiff）は相対比較として
+    // 一定の有用性を持つ。
+    hipAngleNote: 'trunk-thigh-angle'  // 'trunk-thigh-angle' = 肩-股-膝の角度（参考値）
   };
 
   const captureModeLabel = summary.captureMode === 'video' ? '動画ファイル' : 'カメラ';

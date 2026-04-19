@@ -202,7 +202,7 @@ test('waitForVideoLoad polling fallback resolves when readiness appears later', 
       logger: { log() {}, warn() {}, error() {} }
     });
 
-    videoElement.readyState = 1;
+    videoElement.readyState = 2;
     videoElement.videoWidth = 1280;
     videoElement.videoHeight = 720;
     intervals[0]();
@@ -216,7 +216,7 @@ test('waitForVideoLoad polling fallback resolves when readiness appears later', 
   }
 });
 
-test('waitForVideoLoad resolves for mobile videos that decode frames before dimensions are available', async () => {
+test('waitForVideoLoad resolves for mobile videos with readyState>=2 before dimensions are available', async () => {
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
   const originalSetInterval = globalThis.setInterval;
@@ -228,7 +228,7 @@ test('waitForVideoLoad resolves for mobile videos that decode frames before dime
 
   try {
     const videoElement = {
-      readyState: 2,
+      readyState: 2,  // HAVE_CURRENT_DATA: first frame decoded, dimensions may lag
       videoWidth: 0,
       videoHeight: 0,
       duration: 8.5,

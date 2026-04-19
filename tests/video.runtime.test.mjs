@@ -14,7 +14,9 @@ import {
   prepareAnalysisFrame,
   prepareForVideoLoad,
   scheduleAnalysisFrame,
-  scheduleMediaWork
+  scheduleMediaWork,
+  shouldSkipPreDraw,
+  shouldSkipPostDraw
 } from '../src/video/runtime.js';
 
 test('getMediaPipeTimestamp uses wall-clock time for camera streams', () => {
@@ -328,6 +330,25 @@ test('getPostAnalysisStopPlan returns video restore actions for analyzed video d
   );
 });
 
+test('getPostAnalysisStopPlan: video file mode with paused video should NOT trigger restartPreview', () => {
+  // ビデオファイルモードで解析停止後:
+  // restartPreview=false を確認する。
+  // stopAllProcessing() は restartPreview=false の場合のみカメラプレビューを再起動すべきで、
+  // ビデオファイルモードで startCameraPreview() を呼ぶとマーカー二重描画が発生する。
+  const plan = getPostAnalysisStopPlan({
+    hasStream: false,    // カメラなし（ビデオファイルモード）
+    hasVideoSource: true,
+    isVideoPaused: true, // 解析停止後に pause() 済み
+    hasAnalysisData: true
+  });
+  assert.strictEqual(plan.restartPreview, false,
+    'ビデオファイルモードでは restartPreview が false であること（startCameraPreview を呼ばない）');
+  assert.strictEqual(plan.restoreVideoRecordButton, true,
+    'ビデオファイルモードでは記録ボタンの復元は行うこと');
+  assert.strictEqual(plan.enableExports, true,
+    '解析データがある場合はエクスポートボタンを有効化すること');
+});
+
 test('clearLoadedVideoState resets handlers, revokes URLs, and clears source state', () => {
   let revokedUrl = null;
   let canceledHandle = null;
@@ -581,4 +602,63 @@ test('prepareAnalysisFrame preserves counts when the media gate skips a frame', 
       nextLastMpTimestamp: 100
     }
   );
+});
+
+// ── shouldSkipPreDraw ─────────────────────────────────────────────────────────
+
+test('shouldSkipPreDraw skips when readyState < 2', () => {
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 1, isVideoMode: true, isPaused: false }), { skip: true, ended: false });
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 0, isVideoMode: false, isPaused: false }), { skip: true, ended: false });
+});
+
+test('shouldSkipPreDraw skips when video mode is paused', () => {
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 4, isVideoMode: true, isPaused: true }), { skip: true, ended: false });
+});
+
+test('shouldSkipPreDraw skips with ended=true when video is ended', () => {
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 4, isVideoMode: true, isPaused: true, isEnded: true }), { skip: true, ended: true });
+  // ended takes priority over paused in video mode
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 2, isVideoMode: true, isPaused: false, isEnded: true }), { skip: true, ended: true });
+});
+
+test('shouldSkipPreDraw does not skip paused camera streams', () => {
+  // Camera mode (isVideoMode=false) uses wall-clock time so paused state is irrelevant
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 4, isVideoMode: false, isPaused: true }), { skip: false, ended: false });
+});
+
+test('shouldSkipPreDraw does not flag ended for camera streams', () => {
+  // isEnded only matters for video mode
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 4, isVideoMode: false, isPaused: false, isEnded: true }), { skip: false, ended: false });
+});
+
+test('shouldSkipPreDraw proceeds when readyState >= 2 and video is playing', () => {
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 2, isVideoMode: true, isPaused: false }), { skip: false, ended: false });
+  assert.deepEqual(shouldSkipPreDraw({ readyState: 4, isVideoMode: true, isPaused: false }), { skip: false, ended: false });
+});
+
+// ── shouldSkipPostDraw ────────────────────────────────────────────────────────
+
+test('shouldSkipPostDraw skips when detectTimestamp <= lastMpTimestamp in video mode', () => {
+  assert.equal(shouldSkipPostDraw({ isVideoMode: true, detectTimestamp: 100, lastMpTimestamp: 100 }), true);
+  assert.equal(shouldSkipPostDraw({ isVideoMode: true, detectTimestamp: 99, lastMpTimestamp: 100 }), true);
+});
+
+test('shouldSkipPostDraw proceeds when detectTimestamp > lastMpTimestamp in video mode', () => {
+  assert.equal(shouldSkipPostDraw({ isVideoMode: true, detectTimestamp: 101, lastMpTimestamp: 100 }), false);
+});
+
+test('shouldSkipPostDraw never skips in camera mode (wall-clock always increases)', () => {
+  // Camera uses performance.now() which is always strictly increasing, so no need to guard
+  assert.equal(shouldSkipPostDraw({ isVideoMode: false, detectTimestamp: 100, lastMpTimestamp: 100 }), false);
+  assert.equal(shouldSkipPostDraw({ isVideoMode: false, detectTimestamp: 50, lastMpTimestamp: 100 }), false);
+});
+
+test('shouldSkipPostDraw uses detectTimestamp (post-draw) not mpTimestamp (pre-draw)', () => {
+  // This is the key asymmetry fix: post-draw gate uses the timestamp captured
+  // AFTER drawImage, which correctly reflects the video frame on the canvas.
+  // A stale pre-draw mpTimestamp could be <= lastMpTimestamp even when the
+  // canvas has advanced to a new frame.
+  const lastMpTimestamp = 1000;
+  const detectTimestamp = 1033; // 33 ms later (one frame at 30 fps)
+  assert.equal(shouldSkipPostDraw({ isVideoMode: true, detectTimestamp, lastMpTimestamp }), false);
 });

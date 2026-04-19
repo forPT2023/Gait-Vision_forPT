@@ -15,6 +15,11 @@ export function toChartPoint(xValue, value) {
 export function adjustChartYRange({ chart, chartName, nextValue, definition, logger = console }) {
   if (!chart?.options?.scales?.y || !definition?.y || !Number.isFinite(nextValue)) return;
 
+  // ゼロ値はチャートのデフォルトレンジを歪めないようにスキップする。
+  // cadence (min=60) などのチャートでは 0 は「未検出」を意味し、
+  // レンジを [−8, 160] 等に拡大すると視覚的にノイズになる。
+  if (nextValue === 0) return;
+
   const yAxis = chart.options.scales.y;
   const currentMin = Number.isFinite(yAxis.min) ? yAxis.min : definition.y.min;
   const currentMax = Number.isFinite(yAxis.max) ? yAxis.max : definition.y.max;
@@ -157,11 +162,22 @@ export function createChartController({ ChartCtor, document, getVideoContext, no
       const chart = charts[chartName];
       if (chart?.data?.datasets?.[datasetIndex]) {
         const safeValue = (typeof value === 'number' && Number.isFinite(value)) ? value : 0;
+
+        // ゼロ値かつチャートの最小値がゼロより大きい場合（例: cadence chart min=60）は
+        // データポイントをスキップする。ゼロ値をプッシュすると見えない範囲（0付近）に
+        // 線が飛び出して、チャートが視覚的にノイズになってしまう。
+        // 「データなし」として gap（空白）を作る方が正確な表現になる。
+        const definition = CHART_DEFINITIONS[chartName];
+        const chartMin = definition?.y?.min ?? 0;
+        if (safeValue === 0 && chartMin > 0) {
+          return;
+        }
+
         adjustChartYRange({
           chart,
           chartName,
           nextValue: safeValue,
-          definition: CHART_DEFINITIONS[chartName],
+          definition,
           logger
         });
         chart.data.datasets[datasetIndex].data.push(toChartPoint(xValue, safeValue));
