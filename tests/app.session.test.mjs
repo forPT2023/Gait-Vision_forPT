@@ -16,7 +16,8 @@ test('buildSessionRecord includes capture and quality metadata for persistence',
     appVersion: 'test-version'
   });
 
-  assert.equal(record.sessionId, 'session-PT-0001-1767312000000');
+  // v3.10.62: 衝突防止カウンター付きフォーマット 'session-{id}-{ts}-{n}'
+  assert.match(record.sessionId, /^session-PT-0001-1767312000000-\d+$/);
   assert.equal(record.captureMode, 'video');
   assert.equal(record.appVersion, 'test-version');
   assert.equal(record.totalProcessedFrames, 5);

@@ -69,6 +69,12 @@ export function calcTrunkAngle(worldLandmarks, plane = 'frontal') {
   // atan2(offset, dy) に負の dy を渡すと ~180° になるため、|dy| を使用して
   // 「体幹の縦方向の距離」を正値として扱う。
   const absVertical = Math.abs(shoulderMid.y - hipMid.y);
+
+  // absVertical < 1e-3 は「肩と股関節がほぼ同じ高さ」= 物理的にあり得ない姿勢。
+  // 低品質フレームや不正なランドマーク（全座標ゼロなど）によるゼロ除算相当を防ぐため 0 を返す。
+  // atan2(dx_or_dz, 0) = ±90° となり clampMetric で最大値(45°)になるのを回避する。
+  if (absVertical < 1e-3) return 0;
+
   let angle;
 
   if (plane === 'sagittal') {
@@ -105,7 +111,11 @@ export function calcPelvicTilt(worldLandmarks, plane = 'frontal') {
     return Math.abs(Math.atan2(dy, absDz) * (180 / Math.PI));
   }
   // 前額面（正面撮影）: 骨盤左右傾斜を X-Y 平面で計算
+  // dx が 1e-3 未満の場合は左右HIPがほぼ同じX座標（矢状面的配置）であり
+  // atan2(dy, ~0) = ±90° となって不正な値になるため 0 を返す。
+  // 正面撮影時は左右HIPが横に並ぶため dx は通常 0.1m 以上ある。
   const dx = worldLandmarks[LM.RIGHT_HIP].x - worldLandmarks[LM.LEFT_HIP].x;
+  if (Math.abs(dx) < 1e-3) return 0; // dx≈0 は正面向き計測不能 → 0
   return Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
 }
 
@@ -181,6 +191,12 @@ export function calcSymmetryIndex(left, right) {
   if (left === 0 && right === 0) return 100;
   const mean = (left + right) / 2;
   if (mean === 0) return 100;
+
+  // 片側が 0 の場合: calcAngle3D 等の計算失敗（ランドマーク不正）によるゼロを
+  // 本当の「角度ゼロ」と混同して分母が小さくなり対称性が激しく低下するのを防ぐ。
+  // mean > 0 なのに片側が 0 = 測定不能と判断し、対称性不明として 100 を返す。
+  // ※ 両側が同じく小さい値（例: 両側1°）は正常な対称性(100%)として扱われる。
+  if (left === 0 || right === 0) return 100;
 
   const symmetry = 100 - (Math.abs(left - right) / mean * 100);
   return Math.max(0, Math.min(100, symmetry));

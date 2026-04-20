@@ -81,7 +81,8 @@ test('createReportSummary builds a frontal summary with session-based date', () 
 
   assert.equal(summary.reportPlane, 'frontal');
   assert.equal(summary.patientId, 'PT-0001');
-  assert.equal(summary.sessionId, 'session-PT-0001-1767312000000');
+  // v3.10.62: 衝突防止カウンター付きフォーマット 'session-{id}-{ts}-{n}'
+  assert.match(summary.sessionId, /^session-PT-0001-1767312000000-\d+$/);
   assert.equal(summary.appVersion, 'test-report-version');
   assert.equal(summary.stepCount, 6);
   assert.equal(summary.durationMs, 2000);

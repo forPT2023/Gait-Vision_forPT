@@ -222,7 +222,10 @@ test('calcWalkingSpeed falls back to ankle motion when hip displacement is near 
 
 test('calcSymmetryIndex returns 100 for identical values and clamps low values', () => {
   assert.equal(calcSymmetryIndex(30, 30), 100);
-  assert.equal(calcSymmetryIndex(0, 100), 0);
+  // v3.10.62: 片側が 0（計算失敗）のときは測定不能として 100 を返す
+  assert.equal(calcSymmetryIndex(0, 100), 100);
+  // 両側が正の値で大きく差がある場合は低い対称性
+  assert.ok(calcSymmetryIndex(10, 100) < 50);
 });
 
 // ── detectGaitEvent: state machine ベース（worldLandmarks 主検出） ────────────────────────
