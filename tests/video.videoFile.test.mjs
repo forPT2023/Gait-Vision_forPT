@@ -774,3 +774,38 @@ test('startVideoPlaybackForAnalysis resolves when playing timeout fires but vide
   const result = await pending;
   assert.deepEqual(result, { videoEpochBaseMs: 777 });
 });
+
+test('startVideoPlaybackForAnalysis resolves when "ended" fires before "playing"', async () => {
+  // Edge case: very short video where 'ended' fires before 'playing'.
+  // Should resolve (not hang or reject) so the caller can detect ended=true.
+  const listeners = {};
+  const videoElement = {
+    currentTime: 0,
+    ended: true,
+    paused: false,
+    readyState: 4,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
+    play() {
+      this.ended = true; // immediately ended
+      return Promise.resolve();
+    }
+  };
+
+  const warnings = [];
+  const pending = startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn(...args) { warnings.push(args.join(' ')); } },
+    now: () => 42,
+    playingTimeoutMs: 5000,
+    setTimeoutFn: (fn) => { return 1; },
+    clearTimeoutFn: () => {}
+  });
+
+  // Trigger 'ended' event before 'playing'
+  listeners['ended']?.();
+
+  const result = await pending;
+  assert.deepEqual(result, { videoEpochBaseMs: 42 });
+  assert.ok(warnings.some(w => w.includes('ended')), 'should warn about ended-before-playing');
+});

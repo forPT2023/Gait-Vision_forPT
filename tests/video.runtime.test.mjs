@@ -65,6 +65,33 @@ test('getMediaPipeTimestamp offset is ignored for camera streams', () => {
   );
 });
 
+test('getMediaPipeTimestamp returns integer milliseconds to prevent MediaPipe µs mismatch', () => {
+  // MediaPipe internally converts ms → µs via floor(ts * 1000).
+  // Sub-millisecond floats cause "expected X+1 but received X" errors because
+  // floating-point arithmetic can produce values like 21920.415999... whose floor
+  // differs from 21920.416's floor by 1.  Returning Math.floor(ts) guarantees that
+  // our tracked value and MediaPipe's internal value are always consistent.
+
+  // Video mode: sub-ms float is truncated to integer milliseconds
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: false, currentTime: 21.920416, now: () => 0 }),
+    21920  // Math.floor(21920.416) = 21920, not 21920.416
+  );
+  // Camera mode: sub-ms performance.now() value is also truncated
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: true, currentTime: 0, now: () => 21920.416 }),
+    21920  // Math.floor(21920.416) = 21920
+  );
+  // Video mode with offset: combined float arithmetic is floored
+  // offset = 21920 + 1000 - 0.416 = 22919.584
+  // currentTime = 0.000416s → 0.416ms
+  // raw = 0.416 + 22919.584 = 22920.0 → floor = 22920
+  assert.equal(
+    getMediaPipeTimestamp({ hasStream: false, currentTime: 0.000416, now: () => 0, offset: 22919.584 }),
+    22920
+  );
+});
+
 test('getSourceMode resolves camera, video, and idle states', () => {
   assert.equal(getSourceMode({ hasStream: true, videoFileUrl: null }), 'camera');
   assert.equal(getSourceMode({ hasStream: false, videoFileUrl: 'blob:video' }), 'video');
