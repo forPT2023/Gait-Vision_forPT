@@ -271,6 +271,7 @@ export function detectGaitEvent({
   landmarks, prevLandmarks,
   worldLandmarks,
   timestamp,
+  deltaT = 0,               // フレーム間隔 (ms)。FPS適応型EMAアルファの計算に使用。
   lastHeelStrikeTime      = 0,
   lastLeftHeelStrikeTime  = 0,
   lastRightHeelStrikeTime = 0,
@@ -287,10 +288,20 @@ export function detectGaitEvent({
   logger = console,
   minIntervalMs = 400
 }) {
-  // EMA alpha
-  const EMA_A = 0.4;
+  // EMA alpha – FPS適応型
+  // 30fps基準 (α=0.4, τ≈65ms) に合わせるため、フレーム間隔 deltaT に応じてアルファを補正する。
+  // 補正式: α_adj = 1 - (1 - α_30fps)^(deltaT / dt_30fps)
+  // これにより低FPS環境でもEMAの時定数が30fps時と同等になり、state machine の応答性が保たれる。
+  // deltaT が0または無効な場合はデフォルト値 0.4 を使用する。
+  const BASE_ALPHA = 0.4;
+  const BASE_DT_MS = 33; // 30fps 相当のフレーム間隔
+  const EMA_A = (deltaT > 0 && deltaT < 2000)
+    ? Math.min(0.95, 1 - Math.pow(1 - BASE_ALPHA, deltaT / BASE_DT_MS))
+    : BASE_ALPHA;
   // state 遷移ノイズ閾値（EMA後）
-  const NOISE_THR = 0.002;
+  // 低FPS時はEMAがより大きな変化を1フレームで吸収するため、閾値を緩和する。
+  // 基準: 30fps時 0.002m。EMA_A が大きいほど閾値も比例して緩和（最大 0.008m）。
+  const NOISE_THR = Math.min(0.008, 0.002 * (EMA_A / BASE_ALPHA));
   // 接地確認・スウィング確認 共通閾値（worldLandmarks.y: 下向き正、単位m）
   // 接地時踵Y ≈ +0.75〜+0.85m、スウィング最高点 ≈ +0.60〜+0.65m
   // ヒールストライク確認: emaY > HEEL_HIGH_THR（踵が地面近く）
@@ -351,14 +362,23 @@ export function detectGaitEvent({
     else if (dR >  NOISE_THR) nextRS = 'up';      // 踵下降中（接地方向）
     else                      nextRS = 'stable';  // 静止/微振動（接地フラット）
 
-    // swing‑peak 更新: 'down'（踵上昇）フェーズのとき踵Y最小値（最も上がった位置）を追跡
-    // 'stable' 中も継続して最小値を追跡する（'down'→'stable' の連続フェーズをカバー）
+    // swing‑peak 更新: スウィング中（'down'）および直後の状態でも踵Y最小値（最も上がった位置）を追跡
+    // 低FPS（矢状面動画: ~2-3fps）では 'down' → 'up' → 'stable' を1フレームで飛ばすことがある。
+    // そのため 'up' 状態でも更新を継続して最終的なスウィングピークを正確に捉える。
+    // 'up' は踵が接地方向へ下降中なので、既に上昇フェーズ（down）を経験後なら追跡継続が妥当。
+    // ─── バグ修正: 旧実装は `leftHeelState === 'stable' && nextLS === 'stable'` を追加していたが、
+    //              'up'→'stable'（ヒールストライク遷移）でピークが更新されない問題があった。
+    //              修正後: 'up' 状態もピーク更新対象に追加し、低FPS環境での欠落を防ぐ。
     let nSwPeakL = leftSwingPeak;
-    if (leftHeelState === 'down' || nextLS === 'down' || leftHeelState === 'stable' && nextLS === 'stable' && leftSwingPeak !== null) {
+    if (leftHeelState === 'down' || nextLS === 'down' ||
+        leftHeelState === 'up'   || nextLS === 'up'   ||
+        (leftSwingPeak !== null && (leftHeelState === 'stable' && nextLS === 'stable'))) {
       nSwPeakL = (leftSwingPeak === null) ? curEmaL : Math.min(leftSwingPeak, curEmaL);
     }
     let nSwPeakR = rightSwingPeak;
-    if (rightHeelState === 'down' || nextRS === 'down' || rightHeelState === 'stable' && nextRS === 'stable' && rightSwingPeak !== null) {
+    if (rightHeelState === 'down' || nextRS === 'down' ||
+        rightHeelState === 'up'   || nextRS === 'up'   ||
+        (rightSwingPeak !== null && (rightHeelState === 'stable' && nextRS === 'stable'))) {
       nSwPeakR = (rightSwingPeak === null) ? curEmaR : Math.min(rightSwingPeak, curEmaR);
     }
 
@@ -550,6 +570,51 @@ export function detectGaitEvent({
 
 export function ema(prev, cur, alpha = 0.2) {
   return alpha * cur + (1 - alpha) * prev;
+}
+
+/**
+ * calcLandmarkQuality – フレームのランドマーク品質スコア (0.0〜1.0) を計算する。
+ *
+ * 解析に必須な関節（両肩・両股関節・両膝・両踵）の visibility の平均値を返す。
+ * MediaPipe の visibility は検出信頼度 (0〜1) を表す。
+ *
+ * スコアの解釈:
+ *   ≥ QUALITY_THRESHOLD_HIGH (0.7) : 高品質フレーム → 解析データとして採用
+ *   ≥ QUALITY_THRESHOLD_LOW  (0.5) : 中品質フレーム → EMA更新のみ（データには追加しない）
+ *   <  QUALITY_THRESHOLD_LOW (0.5) : 低品質フレーム → 完全スキップ
+ *
+ * @param {Array} landmarks - MediaPipe 正規化ランドマーク (visibility フィールドを持つ)
+ * @returns {number} 品質スコア 0.0〜1.0。ランドマーク未検出時は 0。
+ */
+export const QUALITY_THRESHOLD_HIGH = 0.70; // この値以上なら解析データに追加
+export const QUALITY_THRESHOLD_LOW  = 0.50; // この値以上なら EMA 更新に使用
+
+export function calcLandmarkQuality(landmarks) {
+  if (!landmarks || landmarks.length < 33) return 0;
+
+  // 解析に重要な関節インデックス（左右 肩・股関節・膝・踵）
+  const KEY_INDICES = [
+    LM.LEFT_SHOULDER,  LM.RIGHT_SHOULDER,
+    LM.LEFT_HIP,       LM.RIGHT_HIP,
+    LM.LEFT_KNEE,      LM.RIGHT_KNEE,
+    LM.LEFT_HEEL,      LM.RIGHT_HEEL
+  ];
+
+  let sum = 0;
+  let count = 0;
+  for (const idx of KEY_INDICES) {
+    const lm = landmarks[idx];
+    if (lm && typeof lm.visibility === 'number') {
+      sum += lm.visibility;
+      count++;
+    } else {
+      // visibility フィールドなし → 中程度のスコアとして扱う (1.0 とはしない)
+      sum += 0.5;
+      count++;
+    }
+  }
+
+  return count > 0 ? sum / count : 0;
 }
 
 /**

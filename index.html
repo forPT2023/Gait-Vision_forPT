@@ -579,7 +579,7 @@
     import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
     import { LM, createInitialEmaValues } from './src/analysis/constants.js';
     import { buildAnalysisDataPoint, calculateCadenceFromEvents } from './src/analysis/session.js';
-    import { calcJointAngles, calcPelvicTilt, calcStepSymmetry, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema, KneePeakTracker } from './src/analysis/metrics.js';
+    import { calcJointAngles, calcLandmarkQuality, calcPelvicTilt, calcStepSymmetry, calcSymmetryIndex, calcTrunkAngle, calcWalkingSpeed, detectGaitEvent, ema, KneePeakTracker, QUALITY_THRESHOLD_HIGH, QUALITY_THRESHOLD_LOW } from './src/analysis/metrics.js';
     import { buildStoredPatientIdState, hasStoredConsent, persistConsent, persistPatientId } from './src/app/bootstrap.js';
     import { buildSessionRecord } from './src/app/session.js';
     import { createInitialAnalysisState, createStartedAnalysisState } from './src/app/state.js';
@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.49-gait-v49 loaded — fix: レポートグラフ表示修正・プレビューちらつき抑制・エクスポートマーカー座標改善');
+    console.log('[Gait-Vision] v3.10.56 loaded — fix: 2回目解析ブロック修正（ended=true+currentTime=0でのiOS Safari NotAllowedError解消）');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -2202,14 +2202,16 @@
           createInitialEmaValues,
           now: () => Date.now()
         }));
-        // analysisVideoStartMs は createStartedAnalysisState に含まれないため、
-        // 解析開始時に明示的にリセットする（最初のフレーム処理時に再設定される）
+        // createStartedAnalysisState に含まれない変数を明示的にリセット
         kneePeakTracker = new KneePeakTracker();
         analysisVideoStartMs = 0;
         analysisVideoWidth = 0;
         analysisVideoHeight = 0;
         analysisCanvasWidth = 0;
         analysisCanvasHeight = 0;
+        // analysisFrameCount は createStartedAnalysisState では 0 リセットされるが
+        // 上記の分割代入に含まれていないため明示的にリセットする
+        analysisFrameCount = 0;
 
       // Start charts
         chartController.startCharts();
@@ -2231,6 +2233,35 @@
         let frameCount = 0;
         let lastMpTimestamp = -1;
         let isProcessingFrame = false; // detectForVideo の await 中は true
+
+        // ── 解析開始直後の安定化設計（3層防御）────────────────────────────────
+        // 問題: MediaPipe は開始直後の数フレームでランドマーク位置が不安定になる。
+        //   - GPU/CPUモデルのウォームアップ中は visibility スコアが低い
+        //   - プレビューループの残影（前回推論の状態）を引き継ぐ場合がある
+        //   - 動画デコーダーが最初のフレームを安定してデコードするまでに数フレーム必要
+        //   - 不安定フレームで歩行状態機械（detectGaitEvent）が動くと EMA や状態変数が汚染される
+        //
+        // 2層防御（StableGateは廃止）:
+        //   Layer 1 – ANALYSIS_WARMUP_FRAMES（ハードウォームアップ）:
+        //             最初のN検出フレームは描画のみ。
+        //             gaitDetection・kneePeakTracker・EMA更新・データ追加を一切スキップ。
+        //             ウォームアップ完了後にgait状態変数をリセットしてクリーンな状態で開始。
+        //             【廃止】StableGate（連続高品質要件）:
+        //             矢状面動画では visibility が低くなりがちで、高品質フレームが
+        //             連続しないと永遠に詰まる問題が発生したため廃止。
+        //             代わりにHardWarmup後の最初の中品質以上フレームでEMAを初期化して即開始。
+        //   Layer 2 – Visibility 品質ゲート（通常解析中も継続）:
+        //             QUALITY_THRESHOLD_HIGH (0.70) 未満のフレームはデータに追加しない。
+        //             EMAは QUALITY_THRESHOLD_LOW (0.50) 以上なら更新する。
+        //
+        // FPS別の WARMUP 時間（ANALYSIS_WARMUP_FRAMES=3）:
+        //   30fps → 3フレーム ≈  100ms（GPU安定化には十分）
+        //   3fps  → 3フレーム ≈ 1000ms（矢状面動画）
+        //   → フレーム数ベースなのでFPS非依存
+        const ANALYSIS_WARMUP_FRAMES = 3;  // 最低限スキップするフレーム数
+        // StableGate は廃止（高品質連続要件が矢状面動画で詰まりを引き起こすため）。
+        // HardWarmup完了後の最初の中品質以上フレームで EMA を初期化して即座に解析開始する。
+        let warmupComplete = false;        // ウォームアップ完了後にtrueになる
 
         const scheduleNext = () => {
           // Re-read isAnalyzing at schedule time (not closure-captured value)
@@ -2393,6 +2424,14 @@
             const landmarks = results.landmarks[0];
             const worldLandmarks = results.worldLandmarks ? results.worldLandmarks[0] : null;
 
+            // ── Layer 1: ランドマーク品質スコアを計算 ──────────────────────────
+            // 必須関節（両肩・両股・両膝・両踵）の visibility 平均値。
+            // 0.0〜1.0 のスコアで、高いほど検出が安定している。
+            const landmarkQuality = calcLandmarkQuality(landmarks);
+            const isHighQuality = landmarkQuality >= QUALITY_THRESHOLD_HIGH;
+            const isMidQuality  = landmarkQuality >= QUALITY_THRESHOLD_LOW;
+
+            // ── 常にランドマークを描画（低品質でもユーザーに状況を見せる）──────
             // detectForVideo(canvasElement, ...) はランドマーク座標をキャンバス全体
             // (黒帯を含む) で正規化する。そのため drawEnhancedLandmarks に videoW/H を
             // 渡すと calcVideoDrawRect が黒帯オフセットを二重適用してしまい、
@@ -2404,7 +2443,123 @@
             drawEnhancedLandmarks(landmarks, worldLandmarks, false,
               canvasCtx, analysisCanvasW, analysisCanvasH, 0, 0);
 
+            // ── ウォームアップ中インジケーター描画 ────────────────────────────────
+            // HardWarmup中はキャンバス右上に「安定化中...」を表示し、
+            // ユーザーにマーカーが安定していることを確認させる。
+            if (frameCount <= ANALYSIS_WARMUP_FRAMES) {
+              const iw = analysisCanvasW;
+              const fontSize = Math.max(12, Math.min(18, Math.floor(iw / 30)));
+              canvasCtx.save();
+              const label = `安定化中... (${frameCount}/${ANALYSIS_WARMUP_FRAMES})`;
+              canvasCtx.font = `bold ${fontSize}px sans-serif`;
+              const tw = canvasCtx.measureText(label).width;
+              const pad = 6;
+              const bx = iw - tw - pad * 2 - 8;
+              const by = 8;
+              const bw = tw + pad * 2;
+              const bh = fontSize + pad * 2;
+              canvasCtx.fillStyle = 'rgba(0,0,0,0.55)';
+              canvasCtx.beginPath();
+              canvasCtx.roundRect(bx, by, bw, bh, 4);
+              canvasCtx.fill();
+              canvasCtx.fillStyle = '#FFD700'; // ゴールド
+              canvasCtx.fillText(label, bx + pad, by + pad + fontSize - 2);
+              canvasCtx.restore();
+            }
+
+            // ── Layer 1(WARMUP): 最初のN検出フレームは描画のみ ─────────────────
+            // ウォームアップ中はgait状態機械・kneePeakTracker・EMA・データ追加を一切禁止。
+            // 不安定ランドマークで状態変数が汚染されると以降の解析全体に影響する。
+            const isInHardWarmup = frameCount <= ANALYSIS_WARMUP_FRAMES;
+            if (isInHardWarmup) {
+              if (frameCount === 1 || frameCount === ANALYSIS_WARMUP_FRAMES) {
+                dbgLog('[Analysis] HARD-WARMUP frame=' + frameCount + '/' + ANALYSIS_WARMUP_FRAMES
+                  + ' quality=' + landmarkQuality.toFixed(3) + ' — all processing skipped');
+              }
+              // ウォームアップ最終フレーム: gait状態変数をクリーンにリセットする
+              if (frameCount === ANALYSIS_WARMUP_FRAMES) {
+                // EMAヒール状態をリセット（プレビューループの残影を消去）
+                emaLeftHeelY  = null;
+                emaRightHeelY = null;
+                leftHeelState   = 'stable';
+                rightHeelState  = 'stable';
+                leftSwingPeak   = null;
+                rightSwingPeak  = null;
+                leftHadDownPhase  = false;
+                rightHadDownPhase = false;
+                leftEventCount  = 0;
+                rightEventCount = 0;
+                // タイムスタンプ系のリセット（安定した歩行検出開始タイミングの確定）
+                lastHeelStrikeTime      = 0;
+                lastLeftHeelStrikeTime  = 0;
+                lastRightHeelStrikeTime = 0;
+                stepCount = 0;
+                gaitEvents.length = 0;
+                warmupComplete = false;
+                dbgLog('[Analysis] HARD-WARMUP complete — gait state RESET. EMA will be initialized on next mid-quality frame.');
+              }
+              scheduleNext();
+              return;
+            }
+
+            // ── Layer 2: 低品質フレームはスキップ（描画だけして終了）────────────
+            // WARMUP後も、isMidQuality 未満のフレームは完全スキップ。
+            // マーカーは表示するが、EMA更新もデータ追加もしない。
+            if (!isMidQuality) {
+              if (frameCount % 10 === 0) {
+                dbgLog('[Analysis] LOW-QUALITY frame skipped: score=' + landmarkQuality.toFixed(3) + ' frame=' + frameCount);
+              }
+              scheduleNext();
+              return;
+            }
+
+            // ── ウォームアップ完了後の初回フレームでEMAを初期化 ─────────────────
+            // HardWarmup後の最初の中品質以上フレームでEMAを実測値で初期化し、
+            // 即座に解析（gaitDetection + データ記録）を開始する。
+            // StableGate（連続高品質要件）は廃止：矢状面動画では visibility が低く
+            // 高品質フレームが連続しないため、そのまま詰まる問題を引き起こしていた。
+            if (!warmupComplete) {
+              const angles0 = (analysisPlane === 'sagittal' && worldLandmarks)
+                ? calcJointAngles(worldLandmarks) : null;
+              const trunkAngle0 = worldLandmarks ? calcTrunkAngle(worldLandmarks, analysisPlane) : 0;
+              const pelvicTilt0 = worldLandmarks ? calcPelvicTilt(worldLandmarks, analysisPlane) : 0;
+              // EMAを実測値で直接初期化（ウォームアップ遅延ゼロ）
+              if (angles0) {
+                emaValues.leftKnee   = angles0.leftKnee;
+                emaValues.rightKnee  = angles0.rightKnee;
+                emaValues.leftHip    = angles0.leftHip;
+                emaValues.rightHip   = angles0.rightHip;
+                emaValues.leftAnkle  = angles0.leftAnkle;
+                emaValues.rightAnkle = angles0.rightAnkle;
+              }
+              emaValues.trunk  = trunkAngle0;
+              emaValues.pelvis = pelvicTilt0;
+              emaValues.speed  = 0;
+              prevLandmarks      = landmarks;
+              prevWorldLandmarks = worldLandmarks;
+              prevTimestamp      = detectTimestamp;
+              warmupComplete = true;
+              console.log('[Analysis] WARMUP COMPLETE — EMA initialized. quality=' + landmarkQuality.toFixed(3)
+                + ' frame=' + frameCount + ' Gait detection & data recording START.');
+              // ウォームアップ完了後もgaitDetectionとデータ記録は下のコードで実行される
+              // （ここでreturnしない）
+            }
+
+            // ──────────────────────────────────────────────────────────────────────
+            // ここより下: ウォームアップ完了後の通常解析フレーム処理
+            // ──────────────────────────────────────────────────────────────────────
             const deltaT = (prevTimestamp != null) ? (detectTimestamp - prevTimestamp) : 0;
+            // FPS適応型 EMA アルファ（表示用EmaValues用）
+            // 低FPS環境（矢状面動画: 2-3fps）では deltaT が大きくなるため、
+            // 固定 alpha=0.2 のままだと時定数が長くなりすぎ（3fps → τ≈1500ms）、
+            // 全フレームの平均に影響を与える。
+            // 補正式: α_adj = 1 - (1-0.2)^(deltaT/33)
+            // これにより 30fps 基準の時定数（τ≈149ms）を維持する。
+            const EMA_DISPLAY_BASE_ALPHA = 0.2;
+            const EMA_DISPLAY_BASE_DT = 33; // 30fps
+            const displayEmaAlpha = (deltaT > 0 && deltaT < 2000)
+              ? Math.min(0.95, 1 - Math.pow(1 - EMA_DISPLAY_BASE_ALPHA, deltaT / EMA_DISPLAY_BASE_DT))
+              : EMA_DISPLAY_BASE_ALPHA;
             // 前額面では関節角度を計算しない（カメラが正面向きのため矢状面角度は無意味）
             const angles = (analysisPlane === 'sagittal' && worldLandmarks)
               ? calcJointAngles(worldLandmarks)
@@ -2422,6 +2577,7 @@
               prevLandmarks,
               worldLandmarks,
               timestamp: detectTimestamp,
+              deltaT,
               lastHeelStrikeTime,
               lastLeftHeelStrikeTime,
               lastRightHeelStrikeTime,
@@ -2461,7 +2617,8 @@
             }
 
             // デバッグ: ケイデンス検出の詳細ログ（10フレームごと、またはイベント検出時）
-            if (frameCount <= 5 || frameCount % 10 === 0 || gaitDetection.event) {
+            if (frameCount <= ANALYSIS_WARMUP_FRAMES + 3
+                || frameCount % 10 === 0 || gaitDetection.event) {
               const wLH = worldLandmarks?.[29]; // LEFT_HEEL (world)
               const wRH = worldLandmarks?.[30]; // RIGHT_HEEL (world)
               const _wlStr = `wL=${wLH?.y?.toFixed(3)??'n/a'} wR=${wRH?.y?.toFixed(3)??'n/a'}`;
@@ -2478,53 +2635,24 @@
               mpTimestamp: detectTimestamp
             });
 
-            if (angles) {
-              // 矢状面のみ: 関節角度 EMA を更新
-              // 最初の有効フレーム（prevTimestamp===null）は EMA=0 からの過渡応答を避けるため
-              // 実測値で直接初期化する。frameCount===1 ではなく prevTimestamp===null を条件にする。
-              // 理由: frameCount は drawImage 後に increment されるため、
-              // frameCount=1 でランドマーク検出失敗した場合に初期化がスキップされ
-              // 2フレーム目以降で ema(0, actual) から始まるウォームアップ遅延が発生する。
-              // prevTimestamp===null は「まだ有効フレームが1つも完了していない」状態を示す。
-              if (prevTimestamp === null) {
-                emaValues.leftKnee = angles.leftKnee;
-                emaValues.rightKnee = angles.rightKnee;
-                emaValues.leftHip = angles.leftHip;
-                emaValues.rightHip = angles.rightHip;
-                emaValues.leftAnkle = angles.leftAnkle;
-                emaValues.rightAnkle = angles.rightAnkle;
-              } else {
-                emaValues.leftKnee = ema(emaValues.leftKnee, angles.leftKnee);
-                emaValues.rightKnee = ema(emaValues.rightKnee, angles.rightKnee);
-                emaValues.leftHip = ema(emaValues.leftHip, angles.leftHip);
-                emaValues.rightHip = ema(emaValues.rightHip, angles.rightHip);
-                emaValues.leftAnkle = ema(emaValues.leftAnkle, angles.leftAnkle);
-                emaValues.rightAnkle = ema(emaValues.rightAnkle, angles.rightAnkle);
-              }
+            // EMA 更新（ウォームアップ完了後の通常フレーム）
+            if (angles && prevTimestamp !== null) {
+              emaValues.leftKnee   = ema(emaValues.leftKnee,   angles.leftKnee,   displayEmaAlpha);
+              emaValues.rightKnee  = ema(emaValues.rightKnee,  angles.rightKnee,  displayEmaAlpha);
+              emaValues.leftHip    = ema(emaValues.leftHip,    angles.leftHip,    displayEmaAlpha);
+              emaValues.rightHip   = ema(emaValues.rightHip,   angles.rightHip,   displayEmaAlpha);
+              emaValues.leftAnkle  = ema(emaValues.leftAnkle,  angles.leftAnkle,  displayEmaAlpha);
+              emaValues.rightAnkle = ema(emaValues.rightAnkle, angles.rightAnkle, displayEmaAlpha);
             }
-            // trunk/pelvis/speed も最初の有効フレームは実測値で初期化して EMA のウォームアップ遅延を解消
-            if (prevTimestamp === null) {
-              emaValues.speed = speed;
-              emaValues.trunk = trunkAngle;
-              emaValues.pelvis = pelvicTilt;
-              // cadence は初回はイベントがないため 0 のまま（EMA で収束を待つ）
-              emaValues.cadence = cadence;
-            } else {
-              emaValues.speed = ema(emaValues.speed, speed);
-              // cadence EMA: cadence=0（イベント未検出）のフレームでは EMA を更新しない。
-              // 0 で更新すると検出済みの値が急速に引き下げられてしまうため、
-              // 正の値が得られた場合のみ EMA を更新する。
-              // 初回の非ゼロ値が来た時は EMA をその値で直接初期化してウォームアップ遅延を防ぐ。
+            if (prevTimestamp !== null) {
+              emaValues.speed  = ema(emaValues.speed,  speed,      displayEmaAlpha);
+              emaValues.trunk  = ema(emaValues.trunk,  trunkAngle, displayEmaAlpha);
+              emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt, displayEmaAlpha);
               if (cadence > 0) {
-                if (emaValues.cadence === 0) {
-                  emaValues.cadence = cadence;
-                } else {
-                  emaValues.cadence = ema(emaValues.cadence, cadence);
-                }
+                emaValues.cadence = (emaValues.cadence === 0)
+                  ? cadence
+                  : ema(emaValues.cadence, cadence, displayEmaAlpha);
               }
-              // cadence === 0 の場合: emaValues.cadence はそのまま保持
-              emaValues.trunk = ema(emaValues.trunk, trunkAngle);
-              emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt);
             }
 
             // 対称性: 前額面はステップ対称性（歩行イベントベース）、矢状面は膝角度ベース
@@ -2532,21 +2660,46 @@
               ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee)
               : calcStepSymmetry(gaitEvents);
 
-            const dataPoint = buildAnalysisDataPoint({
-              elapsedMs,
-              analysisStartEpochMs,
-              mpTimestamp: detectTimestamp,
-              landmarks,
-              worldLandmarks,
-              angles,
-              emaValues,
-              kneeSymmetry
-            });
+            // ── Layer 3: データ追加判定 ────────────────────────────────────────────
+            // 高品質フレームのみ analysisData に追加（中品質はチャートのみ更新）
+            if (isHighQuality) {
+              // 通常採用フレーム
+              const dataPoint = buildAnalysisDataPoint({
+                elapsedMs,
+                analysisStartEpochMs,
+                mpTimestamp: detectTimestamp,
+                landmarks,
+                worldLandmarks,
+                angles,
+                emaValues,
+                kneeSymmetry
+              });
+              analysisData.push(dataPoint);
+              chartController.updateCharts(dataPoint);
+            } else {
+              // 中品質フレーム: EMAで平滑化された値でチャートだけ更新
+              // analysisData には追加しない（レポート精度を守る）
+              const previewPoint = buildAnalysisDataPoint({
+                elapsedMs,
+                analysisStartEpochMs,
+                mpTimestamp: detectTimestamp,
+                landmarks,
+                worldLandmarks,
+                angles,
+                emaValues,
+                kneeSymmetry
+              });
+              chartController.updateCharts(previewPoint);
+            }
 
-            analysisData.push(dataPoint);
-
-            chartController.updateCharts(dataPoint);
-
+            // prevLandmarks / prevWorldLandmarks / prevTimestamp は
+            // 中品質以上のフレームで一括更新する。
+            // これらは三つセットで更新しないと calcWalkingSpeed の deltaT と
+            // prevWorldLandmarks がフレームのズレを起こし、速度計算が不正確になる。
+            // （例: A=HQ→B=MQ→C=HQ の場合、prevTimestamp が A のまま B での
+            // prevWorldLandmarks=B が設定されると、C の deltaT=A→C なのに
+            // 変位 B→C を使ってしまい速度が過大推定される）
+            // EMA alpha は displayEmaAlpha の FPS 適応補正で正確性を保つため問題ない。
             prevLandmarks = landmarks;
             prevWorldLandmarks = worldLandmarks;
             prevTimestamp = detectTimestamp;
@@ -2655,11 +2808,24 @@
       // For video-file mode: always pause the video immediately when analysis stops.
       // This prevents the video from continuing to play (and being heard/seen) while
       // the rest of the stop logic runs asynchronously.
-      // ended=true の場合も pause() を試みる（ended 状態を安定させるため）。
-      // ended 状態で pause() を呼ぶのは仕様上有効で、次の解析開始時に
-      // startVideoPlaybackForAnalysis が currentTime=0 にシークしてから play() するため問題ない。
       if (videoFileUrl && videoElement && !videoElement.paused) {
         try { videoElement.pause(); } catch (_) { /* ignore */ }
+      }
+
+      // ── 解析終了後に動画を先頭にシーク（2回目解析の高速化）────────────────────
+      // iOS Safari では startVideoPlaybackForAnalysis() の「currentTime=0 + 100ms待機」が
+      // ユーザージェスチャーのコンテキストを切断し、2回目の play() が NotAllowedError になる。
+      //
+      // 根本原因:
+      //   startVideoPlaybackForAnalysis は currentTime≠0 の場合にのみ 100ms 待機する。
+      //   ended=true のまま currentTime=0 なら待機をスキップして直接 play() できる。
+      //   （v3.10.55 修正: ended=true のチェックを「待機条件」から外した）
+      //
+      // ここでは currentTime=0 をあらかじめセットしておき、
+      // 次の解析開始時に startVideoPlaybackForAnalysis が「seek不要」と判断できるよう準備する。
+      // ended フラグは play() で解消されるため、ここではクリア不要。
+      if (videoFileUrl && videoElement && videoElement.currentTime !== 0) {
+        try { videoElement.currentTime = 0; } catch (_) { /* ignore */ }
       }
 
       if (isRecording) {

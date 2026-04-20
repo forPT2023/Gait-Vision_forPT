@@ -457,7 +457,7 @@ test('startVideoPlaybackForAnalysis resets currentTime and plays ended videos wi
   try {
     const listeners = {};
     const videoElement = {
-      currentTime: 8,
+      currentTime: 8,  // currentTime != 0 → seek delay branch is entered
       ended: true,
       paused: true,
       addEventListener(event, fn) { listeners[event] = fn; },
@@ -484,6 +484,56 @@ test('startVideoPlaybackForAnalysis resets currentTime and plays ended videos wi
     assert.equal(videoElement.currentTime, 0);
     // load() must not appear in the call sequence
     assert.deepEqual(calls, ['play']);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('startVideoPlaybackForAnalysis skips seek delay when ended=true but currentTime=0 (pre-seeked by stopAllProcessing)', async () => {
+  // iOS Safari bug: awaiting the 100ms delay (even with currentTime already at 0)
+  // breaks the user-gesture context → play() throws NotAllowedError.
+  // When stopAllProcessing() has pre-seeked to currentTime=0, the delay must be skipped.
+  const timeoutCalls = [];
+  const calls = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn) => {
+    timeoutCalls.push(fn);
+    return timeoutCalls.length;
+  };
+
+  try {
+    const listeners = {};
+    const videoElement = {
+      currentTime: 0,   // pre-seeked by stopAllProcessing; must NOT trigger delay
+      ended: true,      // video ended after first analysis
+      paused: true,
+      addEventListener(event, fn) { listeners[event] = fn; },
+      removeEventListener(event) { delete listeners[event]; },
+      load() { calls.push('load'); },
+      play() {
+        calls.push('play');
+        this.ended = false;
+        this.paused = false;
+        listeners['playing']?.();
+        return Promise.resolve();
+      }
+    };
+
+    await startVideoPlaybackForAnalysis({
+      videoElement,
+      logger: { log() {}, warn() {} },
+      now: () => 999
+    });
+
+    // play() must be called
+    assert.ok(calls.includes('play'), 'play() should be called');
+    // load() must NOT be called
+    assert.ok(!calls.includes('load'), 'load() must not be called');
+    // currentTime must remain 0 (no unnecessary seek)
+    assert.equal(videoElement.currentTime, 0);
+    // The seek-delay setTimeout must NOT have been called (only the playing-timeout one is allowed)
+    // Only 1 setTimeout call is allowed: the playingTimeoutMs safety net
+    assert.ok(timeoutCalls.length <= 1, 'seek-delay setTimeout must not be called; got ' + timeoutCalls.length);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
@@ -547,4 +597,87 @@ test('startVideoPlaybackForAnalysis does not restart when video is already playi
 
   assert.equal(playCalled, false);
   assert.equal(result.playbackAlreadyRunning, true);
+});
+
+test('startVideoPlaybackForAnalysis resolves via timeout fallback when "playing" event never fires', async () => {
+  // Simulate a browser where play() resolves but 'playing' event is never emitted
+  // (e.g. some iOS Safari versions). The timeout fallback must resolve the promise
+  // so startAnalysis is not permanently blocked.
+  const warnings = [];
+  const setTimeoutCalls = [];
+  let timeoutFn = null;
+  const videoElement = {
+    currentTime: 0,
+    ended: false,
+    paused: true,
+    addEventListener() {},
+    removeEventListener() {},
+    play() {
+      // Resolves but does NOT fire 'playing' event
+      this.paused = false;
+      return Promise.resolve();
+    }
+  };
+
+  const pending = startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn(msg) { warnings.push(msg); } },
+    now: () => 999,
+    playingTimeoutMs: 100,
+    setTimeoutFn: (fn, delay) => {
+      setTimeoutCalls.push(delay);
+      if (delay >= 100) {
+        // Store the timeout fn (the safety fallback timer)
+        timeoutFn = fn;
+      } else {
+        fn(); // immediate for reloadDelayMs
+      }
+      return setTimeoutCalls.length;
+    },
+    clearTimeoutFn: () => {}
+  });
+
+  // Fire the timeout to simulate 'playing' never arriving
+  assert.ok(timeoutFn, 'timeout function should be registered');
+  timeoutFn();
+
+  const result = await pending;
+  assert.deepEqual(result, { videoEpochBaseMs: 999 });
+  assert.ok(warnings.some(w => w.includes('playing') && w.includes('timeout')), 'should log timeout warning');
+});
+
+test('startVideoPlaybackForAnalysis pre-seek optimization: skips reloadDelay when video is already at position 0 and not ended', async () => {
+  // After stopAllProcessing() pre-seeks the video to 0, the second analysis
+  // can skip the 100ms reloadDelay branch entirely and call play() immediately.
+  const setTimeoutCalls = [];
+  const listeners = {};
+  const videoElement = {
+    currentTime: 0,    // already at 0 (pre-seeked by stopAllProcessing)
+    ended: false,      // cleared by the pre-seek
+    paused: true,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
+    play() {
+      this.paused = false;
+      listeners['playing']?.();
+      return Promise.resolve();
+    }
+  };
+
+  await startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn() {} },
+    now: () => 42,
+    setTimeoutFn: (fn, delay) => {
+      setTimeoutCalls.push(delay);
+      return 1;
+    },
+    clearTimeoutFn: () => {}
+  });
+
+  // The reloadDelayMs (100ms) branch should NOT have been entered since
+  // ended=false and currentTime=0. Only the playingTimeoutMs safety timer
+  // was registered.
+  const reloadDelays = setTimeoutCalls.filter(d => d <= 100);
+  assert.equal(reloadDelays.length, 0, 'reloadDelay branch should be skipped when video is at position 0 and not ended');
 });
