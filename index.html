@@ -585,7 +585,7 @@
     import { createInitialAnalysisState, createStartedAnalysisState } from './src/app/state.js';
     import { applyPdfImageLayout, buildPdfImageLayout, buildReportHtml } from './src/report/render.js';
     import { createReportSummary } from './src/report/summary.js';
-    import { APP_VERSION_LABEL } from './src/config/app.js';
+    import { APP_VERSION_LABEL, buildSessionId } from './src/config/app.js';
     import { createChartController } from './src/ui/charts.js';
     import { applyPatientValidationUI, applyPlaneModeUI, disableRecordButton, enableAnalysisExportButtons, formatPatientDisplay, setRecordButtonForActiveAnalysis, setRecordButtonForActiveRecording, setRecordButtonForCameraMode, setRecordButtonForVideoMode } from './src/ui/controls.js';
     import { applyDeviceModeUi, detectDeviceMode } from './src/ui/deviceMode.js';
@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.63 loaded — fix: 前額面レポート速度未計測時の誤コメント防止');
+    console.log('[Gait-Vision] v3.10.64 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -726,6 +726,10 @@
     let patientId = '';
     let analysisStartEpochMs = null;
     let analysisStartMpTimestamp = null;
+    // Bug#7修正: セッションID をセッション開始時に1回だけ生成し、
+    // buildSessionRecord（DB保存）と createReportSummary（レポート表示）の
+    // 両方に同一IDを渡すことでDB⇔レポート間のID不一致を防ぐ。
+    let currentSessionId = null;
     let analysisVideoStartMs = 0;
     let analysisVideoWidth = 0;
     let analysisVideoHeight = 0;
@@ -2008,7 +2012,8 @@
           stepCount,
           analysisFrameCount,
           sessionTimestamp: analysisStartEpochMs || Date.now(),
-          appVersion: APP_VERSION_LABEL
+          appVersion: APP_VERSION_LABEL,
+          sessionId: currentSessionId || undefined
         });
         const sessionId = await saveSession(sessionData);
         if (!sessionId) {
@@ -2252,6 +2257,13 @@
         }));
         // createStartedAnalysisState に含まれない変数を明示的にリセット
         kneePeakTracker = new KneePeakTracker();
+        // Bug#7修正: セッションIDを解析開始時に1回だけ生成してキャッシュ。
+        // DB保存（buildSessionRecord）とレポート表示（createReportSummary）の
+        // 両方に同じIDを渡すことで「DBとレポートでIDが異なる」バグを解消する。
+        currentSessionId = buildSessionId({
+          patientId,
+          sessionTimestamp: analysisStartEpochMs || Date.now()
+        });
         analysisVideoStartMs = 0;
         analysisVideoWidth = 0;
         analysisVideoHeight = 0;
@@ -2767,8 +2779,13 @@
               emaValues.speed = (emaValues.speed === 0 && speed > 0)
                 ? speed
                 : ema(emaValues.speed, speed, displayEmaAlpha);
-              emaValues.trunk  = ema(emaValues.trunk,  trunkAngle, displayEmaAlpha);
-              emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt, displayEmaAlpha);
+              // Bug#6修正: worldLandmarks が null のフレームは trunkAngle/pelvicTilt = 0 になるが、
+              // これは「計測不能」であり EMA に混入させてはいけない。
+              // angles 同様に worldLandmarks の存在チェックでガードする。
+              if (worldLandmarks) {
+                emaValues.trunk  = ema(emaValues.trunk,  trunkAngle, displayEmaAlpha);
+                emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt, displayEmaAlpha);
+              }
               if (cadence > 0) {
                 emaValues.cadence = (emaValues.cadence === 0)
                   ? cadence
@@ -4655,7 +4672,10 @@
         totalProcessedFrames: analysisFrameCount,
         gaitEvents,
         appVersion: APP_VERSION_LABEL,
-        kneePeaks: kneePeakTracker.getSummary()
+        kneePeaks: kneePeakTracker.getSummary(),
+        // Bug#7修正: 解析開始時に生成した共通セッションIDを渡すことで
+        // DB保存（buildSessionRecord）とレポート表示で同一IDを使用する。
+        sessionId: currentSessionId || undefined
       });
 
       const reportHTML = buildReportHtml(summary);
