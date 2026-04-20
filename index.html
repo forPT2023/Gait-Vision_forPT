@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.56 loaded — fix: 2回目解析ブロック修正（ended=true+currentTime=0でのiOS Safari NotAllowedError解消）');
+    console.log('[Gait-Vision] v3.10.57 loaded — fix: 2回目解析 pause→kick-play廃止（iOS Safari NotAllowedError根本修正）');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -2024,6 +2024,14 @@
     }
 
     async function startAnalysis() {
+      dbgLog('[startAnalysis] called | isStartingAnalysis=' + isStartingAnalysis
+        + ' isAnalyzing=' + isAnalyzing
+        + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null')
+        + ' ended=' + videoElement.ended
+        + ' paused=' + videoElement.paused
+        + ' currentTime=' + videoElement.currentTime.toFixed(4)
+        + ' lastAnalysisMpTimestamp=' + lastAnalysisMpTimestamp.toFixed(1)
+        + ' lastDetectForVideoTimestamp=' + lastDetectForVideoTimestamp.toFixed(1));
       if (isStartingAnalysis) {
         return false;
       }
@@ -2080,10 +2088,23 @@
           dbgLog('[startAnalysis] onended cleared before starting new analysis');
         }
 
-      // For video files: seek to start, ensure readyState≥2, then PAUSE.
-      // We register requestVideoFrameCallback BEFORE calling play() so the
-      // callback fires on the very first decoded frame — keeping currentTime
-      // (and therefore analysisVideoStartMs) as close to 0 as possible.
+      // For video files: seek to start and confirm playback has started.
+      //
+      // ── なぜ pause()→kick-play パターンを廃止したか ────────────────────────
+      // 旧実装は startVideoPlaybackForAnalysis() で 'playing' を待った後に
+      // videoElement.pause() し、セットアップ後に再度 play()（kick play）していた。
+      // この「2回目の play()」が iOS Safari で NotAllowedError になる根本原因だった：
+      //   - await を挟むとユーザージェスチャーコンテキストが消失する
+      //   - ジェスチャーコンテキストなしの play() は iOS Safari で拒否される
+      //   - requestVideoFrameCallback が永遠に発火せず analysisData=0 になる
+      //
+      // 新実装:
+      //   1. startVideoPlaybackForAnalysis() がシークして 'playing' を待つ
+      //   2. pause() しない — 動画はセットアップ中も再生し続ける
+      //   3. mpTimestampOffset をセットアップ中に進んだ currentTime を差し引いて計算
+      //      → MediaPipe の単調増加要件を保証
+      //   4. scheduleNext() が再生中の動画に rVFC を登録 → 次フレームで即コールバック
+      //      → kick play 不要
         if (videoFileUrl) {
           try {
             ({ videoEpochBaseMs } = await startVideoPlaybackForAnalysis({
@@ -2092,16 +2113,15 @@
               now: () => Date.now()
             }));
           } catch (e) {
+            console.error('[startAnalysis] startVideoPlaybackForAnalysis failed:', e);
             showNotification('動画の再生に失敗しました', 'error');
             return false;
           }
-          // Pause immediately after the browser confirms playback has started.
-          // All setup (offset, resize, state init) runs while the video is paused,
-          // so currentTime does NOT advance during the setup phase.
-          // We will call play() again just before (or after) registering rVFC,
-          // which guarantees the first processed frame is at the smallest
-          // possible currentTime (≈ one frame interval, e.g. 33 ms at 30 fps).
-          videoElement.pause();
+          // Do NOT pause here. Video is now playing; setup runs while frames flow.
+          // The rVFC registered by scheduleNext() below will catch the next frame.
+          dbgLog('[startAnalysis] video playback started. currentTime=' + videoElement.currentTime.toFixed(4)
+            + ' ended=' + videoElement.ended + ' paused=' + videoElement.paused
+            + ' readyState=' + videoElement.readyState);
         } else {
           videoEpochBaseMs = null;
         }
@@ -2110,19 +2130,30 @@
       // timestamp. After seeking back to 0, currentTime resets which would
       // produce a timestamp smaller than the last one used by detectForVideo()
       // (either in a previous analysis run or in the preview loop).
-      // We compute an offset so currentTime=0 maps to at least
-      // (lastDetectForVideoTimestamp + 1000ms), satisfying MediaPipe's strict
-      // monotonicity requirement from the very first frame.
+      // We compute an offset so that (currentTime * 1000 + offset) starts at
+      // at least (highestPreviousTimestamp + 1000ms).
+      //
+      // Key change: because we no longer pause the video, currentTime may have
+      // already advanced a few ms during setup. We subtract it so the first
+      // processed frame lands near highestPreviousTimestamp + 1000, not at some
+      // arbitrary later value. This guarantees the monotonicity requirement
+      // regardless of how much time the JS setup code takes.
         if (videoFileUrl) {
-          // Use the highest timestamp ever sent to detectForVideo across both
-          // the preview loop and previous analysis runs, then add a 1000 ms gap.
           const highestPreviousTimestamp = Math.max(lastAnalysisMpTimestamp, lastDetectForVideoTimestamp);
+          const currentTimeMs = videoElement.currentTime * 1000;
           if (highestPreviousTimestamp > 0) {
-            // After the seek, currentTime will be ~0, so raw timestamp ≈ 0 + offset.
-            // Set offset so that timestamp starts ≥1000ms after the last used value.
-            mpTimestampOffset = highestPreviousTimestamp + 1000;
+            // offset = highestPrev + 1000 - currentTime_now
+            // so that: currentTime * 1000 + offset ≥ highestPrev + 1000
+            mpTimestampOffset = highestPreviousTimestamp + 1000 - currentTimeMs;
+          } else if (currentTimeMs > 0) {
+            // First run but video has already advanced slightly; keep offset negative
+            // so timestamp starts from currentTime * 1000 (natural, always > 0).
+            mpTimestampOffset = 0;
           }
           // else: first run with no prior detectForVideo calls, offset stays at 0
+          dbgLog('[startAnalysis] mpTimestampOffset=' + mpTimestampOffset.toFixed(1)
+            + ' highestPrev=' + Math.max(lastAnalysisMpTimestamp, lastDetectForVideoTimestamp).toFixed(1)
+            + ' currentTimeMs=' + currentTimeMs.toFixed(1));
         } else {
           mpTimestampOffset = 0;
         }
@@ -2315,6 +2346,12 @@
               isEnded: videoElement.ended
             });
             if (preDraw.skip) {
+              if (frameCount === 0) {
+                // 最初のフレームがまだ来ていない状態でのスキップは詳細ログ出力
+                dbgLog('[processFrame] preDraw.skip at frameCount=0 | readyState=' + videoElement.readyState
+                  + ' paused=' + videoElement.paused + ' ended=' + videoElement.ended
+                  + ' currentTime=' + videoElement.currentTime.toFixed(4));
+              }
               if (preDraw.ended && frameCount > 0) {
                 // 動画終端に達したが onended が未発火 or 遅延しているケース
                 // → 安全網として解析を停止する（finalizeSession は onended 側に任せる）
@@ -2718,18 +2755,20 @@
         }
         }
 
-        // Kick: register rVFC / rAF callback first, then (re-)start play().
-        // For video mode we paused the video after 'playing' so that all the
-        // setup above ran with currentTime frozen at 0.  Now we register the
-        // frame callback and immediately resume play.  Because the callback is
-        // registered *before* play(), the browser fires it on the very first
-        // decoded frame — typically within one frame interval (~33 ms) —
-        // keeping analysisVideoStartMs as small as possible.
+        // Register the rVFC / rAF callback.
+        // Video is already playing (we no longer pause it after startVideoPlaybackForAnalysis),
+        // so the callback fires on the very next decoded frame without a separate play() call.
+        // This eliminates the "kick play()" pattern that broke iOS Safari on the 2nd analysis
+        // (the second play() outside the user-gesture context threw NotAllowedError).
+        dbgLog('[startAnalysis] scheduleNext() — video playing=' + !videoElement.paused
+          + ' ended=' + videoElement.ended + ' currentTime=' + videoElement.currentTime.toFixed(4));
         scheduleNext();
-        if (videoFileUrl && videoElement.paused) {
+        // Safety: if video somehow ended or paused before we could register rVFC,
+        // attempt a single play() to restart. This is a rare edge-case guard only.
+        if (videoFileUrl && (videoElement.paused || videoElement.ended)) {
+          dbgLog('[startAnalysis] video not playing at scheduleNext time — attempting recovery play()');
           videoElement.play().catch((err) => {
-            // Non-fatal: the video might have been stopped by the user already.
-            console.warn('[Analysis] Kick play() failed:', err);
+            console.warn('[Analysis] Recovery play() failed:', err);
           });
         }
 
@@ -2760,6 +2799,8 @@
                   }, 200);
                 }
               } else if (videoFileUrl && analysisData.length === 0) {
+                dbgLog('[onended-analysis] analysisData=0! frameCount(outer)=' + analysisFrameCount
+                  + ' isAnalyzing(was)=true | possible causes: rVFC never fired, all frames skipped by preDraw gate, or all landmarks below quality threshold');
                 showNotification('解析データが取得できませんでした。動画に人物が映っているか確認してください。', 'warning');
               }
             }
@@ -2812,17 +2853,11 @@
         try { videoElement.pause(); } catch (_) { /* ignore */ }
       }
 
-      // ── 解析終了後に動画を先頭にシーク（2回目解析の高速化）────────────────────
-      // iOS Safari では startVideoPlaybackForAnalysis() の「currentTime=0 + 100ms待機」が
-      // ユーザージェスチャーのコンテキストを切断し、2回目の play() が NotAllowedError になる。
-      //
-      // 根本原因:
-      //   startVideoPlaybackForAnalysis は currentTime≠0 の場合にのみ 100ms 待機する。
-      //   ended=true のまま currentTime=0 なら待機をスキップして直接 play() できる。
-      //   （v3.10.55 修正: ended=true のチェックを「待機条件」から外した）
-      //
-      // ここでは currentTime=0 をあらかじめセットしておき、
-      // 次の解析開始時に startVideoPlaybackForAnalysis が「seek不要」と判断できるよう準備する。
+      // ── 解析終了後に動画を先頭にシーク（2回目解析の準備）────────────────────
+      // startVideoPlaybackForAnalysis() の seek 判定を簡素化するため、
+      // 解析終了時に currentTime=0 に先行セットしておく。
+      // startVideoPlaybackForAnalysis は currentTime≠0 の場合のみ seek+100ms待機を行うため、
+      // ここで 0 にセットしておくと次回解析開始が高速になる。
       // ended フラグは play() で解消されるため、ここではクリア不要。
       if (videoFileUrl && videoElement && videoElement.currentTime !== 0) {
         try { videoElement.currentTime = 0; } catch (_) { /* ignore */ }

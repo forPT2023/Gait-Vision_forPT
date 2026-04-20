@@ -448,45 +448,55 @@ test('startVideoPlaybackForAnalysis resets currentTime and plays ended videos wi
   // load() must NOT be called: it resets the media pipeline and causes
   // a second canplay/loadeddata cycle which makes the video appear to play twice.
   const calls = [];
-  const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (fn) => {
-    fn();
-    return 1;
+  // Mock setTimeout: the reloadDelayMs setTimeout (first call) fires immediately;
+  // the playingTimeoutMs setTimeout (second call) is stored but never fired because
+  // play() fires 'playing' synchronously and settles the promise first.
+  let setTimeoutCallCount = 0;
+  const pendingTimeouts = [];
+  const mockSetTimeout = (fn, _ms) => {
+    setTimeoutCallCount++;
+    if (setTimeoutCallCount === 1) {
+      // First call: reloadDelayMs — fire immediately (seek delay)
+      fn();
+    } else {
+      // Subsequent calls: playingTimeoutMs — store but don't fire (play() will settle first)
+      pendingTimeouts.push(fn);
+    }
+    return setTimeoutCallCount;
+  };
+  const mockClearTimeout = () => {};
+
+  const listeners = {};
+  const videoElement = {
+    currentTime: 8,  // currentTime != 0 → seek delay branch is entered
+    ended: true,
+    paused: true,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
+    load() {
+      calls.push('load');
+    },
+    play() {
+      calls.push('play');
+      this.ended = false;
+      this.paused = false;
+      // Fire 'playing' synchronously to simulate the browser clearing ended state.
+      listeners['playing']?.();
+      return Promise.resolve();
+    }
   };
 
-  try {
-    const listeners = {};
-    const videoElement = {
-      currentTime: 8,  // currentTime != 0 → seek delay branch is entered
-      ended: true,
-      paused: true,
-      addEventListener(event, fn) { listeners[event] = fn; },
-      removeEventListener(event) { delete listeners[event]; },
-      load() {
-        calls.push('load');
-      },
-      play() {
-        calls.push('play');
-        this.ended = false;
-        this.paused = false;
-        // Fire 'playing' synchronously to simulate the browser clearing ended state.
-        listeners['playing']?.();
-        return Promise.resolve();
-      }
-    };
+  await startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {} },
+    now: () => 789,
+    setTimeoutFn: mockSetTimeout,
+    clearTimeoutFn: mockClearTimeout
+  });
 
-    await startVideoPlaybackForAnalysis({
-      videoElement,
-      logger: { log() {} },
-      now: () => 789
-    });
-
-    assert.equal(videoElement.currentTime, 0);
-    // load() must not appear in the call sequence
-    assert.deepEqual(calls, ['play']);
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-  }
+  assert.equal(videoElement.currentTime, 0);
+  // load() must not appear in the call sequence
+  assert.deepEqual(calls, ['play']);
 });
 
 test('startVideoPlaybackForAnalysis skips seek delay when ended=true but currentTime=0 (pre-seeked by stopAllProcessing)', async () => {
@@ -599,10 +609,10 @@ test('startVideoPlaybackForAnalysis does not restart when video is already playi
   assert.equal(result.playbackAlreadyRunning, true);
 });
 
-test('startVideoPlaybackForAnalysis resolves via timeout fallback when "playing" event never fires', async () => {
-  // Simulate a browser where play() resolves but 'playing' event is never emitted
-  // (e.g. some iOS Safari versions). The timeout fallback must resolve the promise
-  // so startAnalysis is not permanently blocked.
+test('startVideoPlaybackForAnalysis resolves via timeout fallback when "playing" event never fires but video IS playing', async () => {
+  // Simulate a browser where play() resolves and starts the video (paused=false)
+  // but 'playing' event is never emitted (e.g. some iOS Safari versions).
+  // Because the video IS actually playing at timeout time, we resolve normally.
   const warnings = [];
   const setTimeoutCalls = [];
   let timeoutFn = null;
@@ -680,4 +690,87 @@ test('startVideoPlaybackForAnalysis pre-seek optimization: skips reloadDelay whe
   // was registered.
   const reloadDelays = setTimeoutCalls.filter(d => d <= 100);
   assert.equal(reloadDelays.length, 0, 'reloadDelay branch should be skipped when video is at position 0 and not ended');
+});
+
+test('startVideoPlaybackForAnalysis rejects when playing timeout fires and video is still not playing', async () => {
+  // New behavior (v3.10.57): if the 'playing' event never fires and the video
+  // is still ended/paused after the timeout, reject instead of resolving.
+  // This surfaces the error to startAnalysis which shows a notification,
+  // rather than silently starting analysis with 0 frames.
+  let timeoutFn = null;
+  const listeners = {};
+  const videoElement = {
+    currentTime: 0,
+    ended: true,   // video is still ended after timeout (play() had no effect)
+    paused: true,
+    readyState: 4,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
+    play() {
+      // play() is called but doesn't change state (simulates failure)
+      return Promise.resolve();
+    }
+  };
+
+  const warnings = [];
+  const pending = startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn(...args) { warnings.push(args.join(' ')); } },
+    now: () => 999,
+    playingTimeoutMs: 5000,
+    setTimeoutFn: (fn, delay) => {
+      if (delay >= 4000) {
+        timeoutFn = fn;  // capture the playing-timeout
+      }
+      return 1;
+    },
+    clearTimeoutFn: () => {}
+  });
+
+  assert.ok(timeoutFn, 'playing timeout should be registered');
+  timeoutFn(); // fire the timeout — video is still ended=true
+
+  await assert.rejects(pending, /did not start/i);
+  assert.ok(warnings.some(w => w.includes('REJECTING')), 'should log REJECTING warning');
+});
+
+test('startVideoPlaybackForAnalysis resolves when playing timeout fires but video IS playing', async () => {
+  // If the 'playing' event never fires but play() did actually start the video
+  // (ended=false, paused=false at timeout time), resolve normally.
+  let timeoutFn = null;
+  const listeners = {};
+  const videoElement = {
+    currentTime: 0,
+    ended: false,   // not ended, but paused initially so we enter the play() path
+    paused: true,
+    readyState: 4,
+    addEventListener(event, fn) { listeners[event] = fn; },
+    removeEventListener(event) { delete listeners[event]; },
+    play() {
+      // play() starts the video but 'playing' event is never fired (simulated)
+      this.paused = false;
+      this.currentTime = 0.1;
+      return Promise.resolve();
+    }
+  };
+
+  const pending = startVideoPlaybackForAnalysis({
+    videoElement,
+    logger: { log() {}, warn() {} },
+    now: () => 777,
+    playingTimeoutMs: 5000,
+    setTimeoutFn: (fn, delay) => {
+      if (delay >= 4000) {
+        timeoutFn = fn;  // capture the playing-timeout
+      }
+      return 1;
+    },
+    clearTimeoutFn: () => {}
+  });
+
+  assert.ok(timeoutFn, 'playing timeout should be registered');
+  timeoutFn(); // fire the timeout — video IS playing (ended=false, paused=false)
+
+  const result = await pending;
+  assert.deepEqual(result, { videoEpochBaseMs: 777 });
 });
