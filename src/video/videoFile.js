@@ -281,8 +281,18 @@ export async function startVideoPlaybackForAnalysis({
         if (settled) return;
         settled = true;
         cleanup();
-        logger.warn?.('[Analysis] "playing" event timeout — resolving anyway after ' + playingTimeoutMs + 'ms');
-        resolve();
+        const stillNotPlaying = videoElement.ended || videoElement.paused;
+        logger.warn?.('[Analysis] "playing" event timeout after ' + playingTimeoutMs + 'ms'
+          + ' | ended=' + videoElement.ended + ' paused=' + videoElement.paused
+          + ' readyState=' + videoElement.readyState + ' currentTime=' + videoElement.currentTime?.toFixed(4)
+          + ' | ' + (stillNotPlaying ? 'REJECTING (video not actually playing)' : 'resolving (video is playing)'));
+        if (stillNotPlaying) {
+          // Video is still not playing after the timeout — reject so startAnalysis
+          // can show an error notification rather than silently producing 0 frames.
+          reject(new Error('Video playback did not start within ' + playingTimeoutMs + 'ms'));
+        } else {
+          resolve();
+        }
       }, playingTimeoutMs);
 
       videoElement.play().catch((err) => {
@@ -293,7 +303,8 @@ export async function startVideoPlaybackForAnalysis({
       });
     });
 
-    logger.log('[Analysis] Video play() succeeded');
+    logger.log('[Analysis] Video play() succeeded | ended=' + videoElement.ended
+      + ' paused=' + videoElement.paused + ' currentTime=' + videoElement.currentTime?.toFixed(4));
 
     return {
       videoEpochBaseMs: now()
