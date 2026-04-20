@@ -1,6 +1,17 @@
 export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => performance.now(), offset = 0 }) {
+  // MediaPipe internally converts the JS timestamp (milliseconds) to microseconds by
+  // computing floor(ts_ms * 1000).  If we pass a sub-millisecond float such as
+  // 21920.416, MediaPipe stores 21920416 µs.  On the next call, floating-point
+  // arithmetic can produce 21920.415999… which floors to 21920415 µs — one less than
+  // the previously seen value — triggering:
+  //   "Packet timestamp mismatch on stream free_memory: expected 21920416 got 21920415"
+  //
+  // Fix: always return an *integer* millisecond value.  For camera mode we use
+  // Math.floor(performance.now()) so the value is still monotonically increasing.
+  // For video-file mode we floor the computed offset timestamp.
+  // Integer ms → integer µs (ms * 1000) → no sub-µs truncation ambiguity.
   if (hasStream) {
-    return now();
+    return Math.floor(now());
   }
 
   const safeCurrentTime = Number(currentTime);
@@ -8,7 +19,7 @@ export function getMediaPipeTimestamp({ hasStream, currentTime, now = () => perf
     return 0;
   }
 
-  return Math.max(0, safeCurrentTime * 1000 + offset);
+  return Math.max(0, Math.floor(safeCurrentTime * 1000 + offset));
 }
 
 export function getSourceMode({ hasStream, videoFileUrl }) {

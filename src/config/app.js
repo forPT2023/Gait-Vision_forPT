@@ -1,4 +1,4 @@
-export const APP_SEMVER = '3.10.57';
+export const APP_SEMVER = '3.10.61';
 export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`;
 
 export function buildSessionId({ patientId = 'unknown', sessionTimestamp, prefix = 'session' } = {}) {

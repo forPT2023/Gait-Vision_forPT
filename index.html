@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.57 loaded — fix: 2回目解析 pause→kick-play廃止（iOS Safari NotAllowedError根本修正）');
+    console.log('[Gait-Vision] v3.10.61 loaded — fix: 速度EMAラグ解消 + レポート時系列グラフY軸オーバーフロー修正');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -2024,14 +2024,16 @@
     }
 
     async function startAnalysis() {
-      dbgLog('[startAnalysis] called | isStartingAnalysis=' + isStartingAnalysis
+      // Always log analysis start (not just in debug mode) to help diagnose repeated failures.
+      console.log('[startAnalysis] called | isStartingAnalysis=' + isStartingAnalysis
         + ' isAnalyzing=' + isAnalyzing
         + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null')
         + ' ended=' + videoElement.ended
         + ' paused=' + videoElement.paused
         + ' currentTime=' + videoElement.currentTime.toFixed(4)
         + ' lastAnalysisMpTimestamp=' + lastAnalysisMpTimestamp.toFixed(1)
-        + ' lastDetectForVideoTimestamp=' + lastDetectForVideoTimestamp.toFixed(1));
+        + ' lastDetectForVideoTimestamp=' + lastDetectForVideoTimestamp.toFixed(1)
+        + ' mpTimestampOffset=' + mpTimestampOffset.toFixed(1));
       if (isStartingAnalysis) {
         return false;
       }
@@ -2129,7 +2131,7 @@
       // For video mode: ensure MediaPipe receives a monotonically increasing
       // timestamp. After seeking back to 0, currentTime resets which would
       // produce a timestamp smaller than the last one used by detectForVideo()
-      // (either in a previous analysis run or in the preview loop).
+      // in a previous analysis run.
       // We compute an offset so that (currentTime * 1000 + offset) starts at
       // at least (highestPreviousTimestamp + 1000ms).
       //
@@ -2138,21 +2140,36 @@
       // processed frame lands near highestPreviousTimestamp + 1000, not at some
       // arbitrary later value. This guarantees the monotonicity requirement
       // regardless of how much time the JS setup code takes.
+      //
+      // NOTE: We intentionally use only lastAnalysisMpTimestamp here, NOT
+      // lastDetectForVideoTimestamp. The preview loop also updates
+      // lastDetectForVideoTimestamp continuously while the video is being
+      // previewed (after analysis finishes). Its value can be much larger than
+      // the actual analysis endpoint (e.g., the user scrubs ahead in preview)
+      // and would produce an unnecessarily large offset that still satisfies
+      // MediaPipe's monotonicity requirement but wastes the timestamp space.
+      // lastAnalysisMpTimestamp is updated only by the analysis loop itself and
+      // accurately represents the highest timestamp seen by detectForVideo during
+      // analysis — exactly what we need for the offset calculation.
         if (videoFileUrl) {
-          const highestPreviousTimestamp = Math.max(lastAnalysisMpTimestamp, lastDetectForVideoTimestamp);
+          const prevAnalysisTimestamp = lastAnalysisMpTimestamp;
           const currentTimeMs = videoElement.currentTime * 1000;
-          if (highestPreviousTimestamp > 0) {
-            // offset = highestPrev + 1000 - currentTime_now
-            // so that: currentTime * 1000 + offset ≥ highestPrev + 1000
-            mpTimestampOffset = highestPreviousTimestamp + 1000 - currentTimeMs;
+          if (prevAnalysisTimestamp > 0) {
+            // offset = prevAnalysis + 1000 - currentTime_now
+            // so that: currentTime * 1000 + offset ≥ prevAnalysis + 1000
+            mpTimestampOffset = prevAnalysisTimestamp + 1000 - currentTimeMs;
+          } else if (lastDetectForVideoTimestamp > 0) {
+            // No previous analysis run, but preview loop ran (first analysis after preview).
+            // Use lastDetectForVideoTimestamp only as a fallback to ensure monotonicity.
+            mpTimestampOffset = lastDetectForVideoTimestamp + 1000 - currentTimeMs;
           } else if (currentTimeMs > 0) {
-            // First run but video has already advanced slightly; keep offset negative
-            // so timestamp starts from currentTime * 1000 (natural, always > 0).
+            // First run, video has already advanced slightly; natural timestamp is fine.
             mpTimestampOffset = 0;
           }
           // else: first run with no prior detectForVideo calls, offset stays at 0
-          dbgLog('[startAnalysis] mpTimestampOffset=' + mpTimestampOffset.toFixed(1)
-            + ' highestPrev=' + Math.max(lastAnalysisMpTimestamp, lastDetectForVideoTimestamp).toFixed(1)
+          console.log('[startAnalysis] mpTimestampOffset=' + mpTimestampOffset.toFixed(1)
+            + ' lastAnalysisMpTimestamp=' + lastAnalysisMpTimestamp.toFixed(1)
+            + ' lastDetectForVideoTimestamp=' + lastDetectForVideoTimestamp.toFixed(1)
             + ' currentTimeMs=' + currentTimeMs.toFixed(1));
         } else {
           mpTimestampOffset = 0;
@@ -2264,6 +2281,36 @@
         let frameCount = 0;
         let lastMpTimestamp = -1;
         let isProcessingFrame = false; // detectForVideo の await 中は true
+        let preDraw_skipCount = 0; // processFrame で preDraw.skip が続いた回数（デバッグ用）
+
+        // ── スタック検出タイマー ──────────────────────────────────────────────
+        // ended=true は processFrame の Pre-draw ゲートで即座に stopAllProcessing() を
+        // 呼ぶように修正済みのため、ended による無限ループは起きない。
+        // paused=true の場合も PREDRAW_PAUSED_LIMIT (約1秒) で強制停止する。
+        // stuckTimer は上記の高速ガードをすり抜けた場合のバックストップとして残す。
+        // rVFC 環境では ended/paused の動画に rVFC を登録しても発火しないため
+        // processFrame が呼ばれないケース（= 完全なサイレント失敗）のみカバーする。
+        const STUCK_TIMEOUT_MS = 8000;
+        let stuckTimerHandle = null;
+        if (videoFileUrl) {
+          stuckTimerHandle = setTimeout(() => {
+            if (!isAnalyzing || frameCount > 0) return;
+            console.error('[Analysis] STUCK: frameCount=0 after ' + STUCK_TIMEOUT_MS + 'ms'
+              + ' | paused=' + videoElement.paused
+              + ' ended=' + videoElement.ended
+              + ' readyState=' + videoElement.readyState
+              + ' currentTime=' + videoElement.currentTime?.toFixed(4)
+              + ' skipCount=' + preDraw_skipCount);
+            showNotification('動画の再生が開始できませんでした。もう一度お試しください。', 'error');
+            stopAllProcessing();
+          }, STUCK_TIMEOUT_MS);
+        }
+        const clearStuckTimer = () => {
+          if (stuckTimerHandle !== null) {
+            clearTimeout(stuckTimerHandle);
+            stuckTimerHandle = null;
+          }
+        };
 
         // ── 解析開始直後の安定化設計（3層防御）────────────────────────────────
         // 問題: MediaPipe は開始直後の数フレームでランドマーク位置が不安定になる。
@@ -2333,11 +2380,28 @@
           // readyState / paused / ended をチェック。タイムスタンプ比較はまだ行わない。
           // このチェックは drawImage より前に行うことで不要な canvas 書き込みを防ぐ。
           //
-          // ended=true の場合: onended ハンドラーが遅延・未発火でも解析を安全停止する。
-          // ただし frameCount===0（まだ1フレームも処理していない）の場合は停止しない。
-          // これは別動画の解析開始直後に、前の動画の ended 状態が一瞬残るケースや
-          // play() が非同期で完了する前に rAF が発火するブラウザのタイミング問題で
-          // 解析が即座に停止してしまう不具合（矢状面への切り替え後に解析できない）を防ぐ。
+          // ended=true (どの frameCount でも):
+          //   onended が既に発火していれば isAnalyzing=false になっており
+          //   processFrame の先頭ガードで return している。
+          //   ここに来た = onended が未発火/遅延 or scheduleNext() 後に ended になった。
+          //   どちらの場合も即座に stopAllProcessing() を呼んで安全網とする。
+          //   rVFC 環境では ended=true の動画に rVFC を登録しても発火しないため
+          //   scheduleNext() を呼ぶと永久に何も起きないデッドロックになる。
+          //   rAF 環境でも scheduleNext() を呼ぶと高速 rAF ループになるだけ。
+          //   → どちらも scheduleNext() せず即停止するのが正解。
+          //
+          // paused=true & frameCount=0:
+          //   startVideoPlaybackForAnalysis() は playing イベントを待ってから
+          //   return しているため、直後は paused=false のはず。
+          //   もし paused=true なら play() が失敗しているか、ごく短い動画で
+          //   playing→ended が一瞬で発生した（その場合は ended=true で上の分岐に入る）。
+          //   PREDRAW_PAUSED_LIMIT 回連続してもフレームが来なければ stopped として扱う。
+          //
+          // paused=true & frameCount>0:
+          //   rVFC 環境: 動画が一時停止されると rVFC は発火しなくなるため問題なし。
+          //   rAF 環境: scheduleNext() で rAF ループが続くが、stuckTimer は既に解除済み。
+          //             ここでは scheduleNext() を継続し、video が resume したら自然に再開。
+          const PREDRAW_PAUSED_LIMIT = 60; // ~1s at 60fps
           {
             const preDraw = shouldSkipPreDraw({
               readyState: videoElement.readyState,
@@ -2346,23 +2410,40 @@
               isEnded: videoElement.ended
             });
             if (preDraw.skip) {
-              if (frameCount === 0) {
-                // 最初のフレームがまだ来ていない状態でのスキップは詳細ログ出力
-                dbgLog('[processFrame] preDraw.skip at frameCount=0 | readyState=' + videoElement.readyState
+              preDraw_skipCount++;
+              if (preDraw_skipCount <= 5 || preDraw_skipCount % 60 === 0) {
+                console.warn('[processFrame] preDraw.skip #' + preDraw_skipCount
+                  + ' frameCount=' + frameCount
                   + ' paused=' + videoElement.paused + ' ended=' + videoElement.ended
+                  + ' readyState=' + videoElement.readyState
                   + ' currentTime=' + videoElement.currentTime.toFixed(4));
               }
-              if (preDraw.ended && frameCount > 0) {
-                // 動画終端に達したが onended が未発火 or 遅延しているケース
-                // → 安全網として解析を停止する（finalizeSession は onended 側に任せる）
-                // frameCount > 0 を条件にすることで、解析開始直後の誤検知を防ぐ
-                console.warn('[Analysis] video.ended detected in processFrame loop (frameCount=' + frameCount + ') — calling stopAllProcessing() as safety net');
+              if (preDraw.ended) {
+                // ended=true: onended 遅延/未発火の安全網として即停止
+                // rVFC 環境では ended 動画に登録しても発火しない → デッドロック防止
+                clearStuckTimer();
+                console.warn('[Analysis] video.ended detected in processFrame'
+                  + ' (frameCount=' + frameCount + ') — stopping as safety net');
+                stopAllProcessing();
+                return;
+              }
+              // paused=true かつ frameCount=0 が一定回数以上続く場合は強制停止
+              // (play() が実際には開始していない可能性)
+              if (videoFileUrl && videoElement.paused && frameCount === 0
+                  && preDraw_skipCount >= PREDRAW_PAUSED_LIMIT) {
+                clearStuckTimer();
+                console.error('[Analysis] paused=true persists for ' + preDraw_skipCount
+                  + ' frames with frameCount=0 — aborting analysis');
+                showNotification('動画の再生が開始できませんでした。もう一度お試しください。', 'error');
                 stopAllProcessing();
                 return;
               }
               scheduleNext();
               return;
             }
+            // 正常にフレームを処理できた → stuckTimer を解除
+            if (frameCount === 0) clearStuckTimer();
+            preDraw_skipCount = 0;
           }
 
           // ── ステージ2: drawImage でフレームを canvas に固定 ───────────────────
@@ -2682,7 +2763,10 @@
               emaValues.rightAnkle = ema(emaValues.rightAnkle, angles.rightAnkle, displayEmaAlpha);
             }
             if (prevTimestamp !== null) {
-              emaValues.speed  = ema(emaValues.speed,  speed,      displayEmaAlpha);
+              // 速度EMAの初期ラグ対策: 最初の有効速度フレームで直接シード（EMA=0スタートを回避）
+              emaValues.speed = (emaValues.speed === 0 && speed > 0)
+                ? speed
+                : ema(emaValues.speed, speed, displayEmaAlpha);
               emaValues.trunk  = ema(emaValues.trunk,  trunkAngle, displayEmaAlpha);
               emaValues.pelvis = ema(emaValues.pelvis, pelvicTilt, displayEmaAlpha);
               if (cadence > 0) {
@@ -2755,30 +2839,16 @@
         }
         }
 
-        // Register the rVFC / rAF callback.
-        // Video is already playing (we no longer pause it after startVideoPlaybackForAnalysis),
-        // so the callback fires on the very next decoded frame without a separate play() call.
-        // This eliminates the "kick play()" pattern that broke iOS Safari on the 2nd analysis
-        // (the second play() outside the user-gesture context threw NotAllowedError).
-        dbgLog('[startAnalysis] scheduleNext() — video playing=' + !videoElement.paused
-          + ' ended=' + videoElement.ended + ' currentTime=' + videoElement.currentTime.toFixed(4));
-        scheduleNext();
-        // Safety: if video somehow ended or paused before we could register rVFC,
-        // attempt a single play() to restart. This is a rare edge-case guard only.
-        if (videoFileUrl && (videoElement.paused || videoElement.ended)) {
-          dbgLog('[startAnalysis] video not playing at scheduleNext time — attempting recovery play()');
-          videoElement.play().catch((err) => {
-            console.warn('[Analysis] Recovery play() failed:', err);
-          });
-        }
-
-        // ── 解析用 onended ハンドラーをここで登録 ─────────────────────────────
-        // startAnalysis() の先頭でクリアしたため、必ずここで再登録する。
-        // これにより「2回目解析開始 → 動画終了」時に確実に finalizeSession() が
-        // 呼ばれるよう保証する。
+        // ── 解析用 onended ハンドラーを scheduleNext() より前に登録 ─────────────
+        // onended を先に登録することで、scheduleNext() 直後に動画が終了しても
+        // finalizeSession() が確実に呼ばれる（競合ウィンドウを最小化）。
+        // startAnalysis() の先頭で onended=null にクリア済みのため必ずここで再登録する。
         if (videoFileUrl && videoElement) {
           videoElement.onended = async () => {
-            dbgLog('[onended-analysis] fired! isAnalyzing=' + isAnalyzing + ' analysisData=' + analysisData.length);
+            clearStuckTimer(); // onended が発火した = 動画は再生された
+            dbgLog('[onended-analysis] fired! isAnalyzing=' + isAnalyzing
+              + ' analysisData=' + analysisData.length
+              + ' analysisFrameCount=' + analysisFrameCount);
             videoElement.onended = null;
             if (isAnalyzing) {
               await finalizeSession();
@@ -2799,13 +2869,59 @@
                   }, 200);
                 }
               } else if (videoFileUrl && analysisData.length === 0) {
-                dbgLog('[onended-analysis] analysisData=0! frameCount(outer)=' + analysisFrameCount
-                  + ' isAnalyzing(was)=true | possible causes: rVFC never fired, all frames skipped by preDraw gate, or all landmarks below quality threshold');
+                console.warn('[onended-analysis] analysisData=0! analysisFrameCount=' + analysisFrameCount
+                  + ' | causes: rVFC never fired / all frames skipped by preDraw gate / all landmarks below quality threshold');
                 showNotification('解析データが取得できませんでした。動画に人物が映っているか確認してください。', 'warning');
               }
             }
           };
-          dbgLog('[startAnalysis] onended registered for new analysis run');
+          dbgLog('[startAnalysis] onended registered');
+        }
+
+        // ── rVFC / rAF コールバックを登録 ────────────────────────────────────
+        // onended を先に登録した後に scheduleNext() を呼ぶことで、
+        // 極短い動画でも onended → finalizeSession() の順が保証される。
+        console.log('[startAnalysis] scheduleNext() — paused=' + videoElement.paused
+          + ' ended=' + videoElement.ended
+          + ' currentTime=' + videoElement.currentTime.toFixed(4));
+
+        // ── 超短い動画の対処: ended=true のまま scheduleNext() に到達した場合 ──
+        // startVideoPlaybackForAnalysis() で 'ended' イベントが 'playing' より先に
+        // 発火した場合（ended=true で return する）、videoElement.onended が
+        // 既にここで発火済みの可能性がある（同期ハンドラーなら発火している）。
+        // しかし非同期のブラウザイベントキューの関係で onended が「まだ発火していない」
+        // こともあり得る。
+        // ended=true && !isAnalyzing の場合（onended が発火済み）: scheduleNext 不要。
+        // ended=true && isAnalyzing の場合（onended がまだ発火していない）:
+        //   rVFC 環境では ended 動画への rVFC は永久に発火しない → scheduleNext 無意味。
+        //   rAF 環境では scheduleNext → processFrame → preDraw.ended → stopAllProcessing と
+        //   なるが、それより先に次のイベントループで onended が発火する可能性が高い。
+        //   いずれにせよ scheduleNext() を呼ぶより直接処理した方が確実。
+        // → ended=true の場合は scheduleNext() をスキップし、
+        //   次のマイクロタスクで onended の発火を待つ。
+        //   onended が発火していれば isAnalyzing=false なので何もしない。
+        //   発火していなければ setTimeout(0) 後に手動でトリガーする。
+        if (videoFileUrl && videoElement.ended) {
+          console.warn('[startAnalysis] video.ended=true at scheduleNext time'
+            + ' — skipping scheduleNext(), will fire onended manually if needed');
+          setTimeout(() => {
+            if (isAnalyzing && videoElement && videoElement.onended) {
+              console.warn('[startAnalysis] manually triggering onended for ended video');
+              const handler = videoElement.onended;
+              videoElement.onended = null;
+              handler.call(videoElement, new Event('ended'));
+            } else {
+              dbgLog('[startAnalysis] ended video: onended already fired or analysis stopped');
+            }
+          }, 0);
+        } else {
+          scheduleNext();
+        }
+
+        if (videoFileUrl && videoElement.paused && !videoElement.ended) {
+          console.warn('[startAnalysis] video paused (not ended) at scheduleNext():'
+            + ' paused=' + videoElement.paused
+            + ' — stuckTimer will force-stop in ' + STUCK_TIMEOUT_MS + 'ms if no frame arrives');
         }
 
         return true;
@@ -4092,8 +4208,11 @@
         //
         // onended ハンドラーをここで再登録することで、次回の解析完了時に
         // finalizeSession()/stopAllProcessing() が正しく実行される。
-        dbgLog('[renderAnalyzedVideoBlob] finally: re-registering onended. videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' currentOnended=' + (videoElement.onended ? 'set' : 'null'));
-        if (videoElement && videoFileUrl && !videoElement.onended) {
+        dbgLog('[renderAnalyzedVideoBlob] finally: re-registering onended. videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' isAnalyzing=' + isAnalyzing + ' currentOnended=' + (videoElement.onended ? 'set' : 'null'));
+        // isAnalyzing=true の場合は startAnalysis() が既に onended を登録しているため
+        // ここでの再登録は不要（かつ上書きすると解析が壊れる）。
+        // isAnalyzing=false でかつ onended が未登録の場合のみ再登録する。
+        if (videoElement && videoFileUrl && !videoElement.onended && !isAnalyzing) {
           videoElement.onended = async () => {
             dbgLog('[onended-restored] fired! isAnalyzing=' + isAnalyzing + ' analysisData=' + analysisData.length);
             videoElement.onended = null;
@@ -4356,7 +4475,7 @@
                 x: { stacked: false },
                 y: {
                   beginAtZero: true,
-                  max: kneeYMax,
+                  suggestedMax: kneeYMax,
                   title: { display: true, text: '角度 (°)', font: { size: 10 } }
                 }
               }
@@ -4393,7 +4512,7 @@
               scales: {
                 y: {
                   beginAtZero: true,
-                  max: hipYMax,
+                  suggestedMax: hipYMax,
                   title: { display: true, text: '角度 (°)', font: { size: 10 } }
                 }
               }
@@ -4454,29 +4573,37 @@
           });
         }
 
-        // Y軸レンジを実データから動的に決定
-        const speedValues = sampledData.map(d => d.speed).filter(v => v > 0);
-        const speedMax = speedValues.length > 0
-          ? Math.ceil(Math.max(2, ...speedValues) * 10) / 10 + 0.2
-          : 2;
-        const kneeValues = isSagittal
-          ? sampledData.flatMap(d => [d.leftKnee, d.rightKnee]).filter(v => v > 0)
+        // Y軸レンジを実データから動的に決定（間引き後のサンプルと全データ両方を参照）
+        // 間引きによるピーク見逃しを防ぐため、全analysisDataから最大値を計算
+        const allSpeedValues = analysisData.map(d => d.speed).filter(v => v > 0);
+        const speedMax = allSpeedValues.length > 0
+          ? Math.ceil(Math.max(2, ...allSpeedValues) * 10) / 10 + 0.3
+          : 2.5;
+        const allKneeValues = isSagittal
+          ? analysisData.flatMap(d => [d.leftKnee, d.rightKnee]).filter(v => v > 0)
           : [];
-        const kneeMax = kneeValues.length > 0
-          ? Math.ceil(Math.max(90, ...kneeValues) / 10) * 10 + 10
+        const kneeMax = allKneeValues.length > 0
+          ? Math.ceil(Math.max(90, ...allKneeValues) / 10) * 10 + 15
           : 120;
+        // 対称性は理論上0-100だが、念のため実データの最大値も確認
+        const allSymValues = analysisData.map(d => d.symmetry).filter(v => v != null);
+        const symMax = allSymValues.length > 0
+          ? Math.min(100, Math.max(100, Math.ceil(Math.max(...allSymValues) / 10) * 10))
+          : 100;
 
         const timelineScales = {
           x: { title: { display: true, text: '経過時間', font: { size: 10 } }, ticks: { maxTicksLimit: 10 } },
           y: {
             type: 'linear', display: true, position: 'left',
             title: { display: true, text: '速度 (m/s)', font: { size: 10 } },
-            min: 0, max: speedMax
+            min: 0,
+            suggestedMax: speedMax  // データがspeedMaxを超えた場合は自動拡張
           },
           y1: {
             type: 'linear', display: true, position: 'right',
             title: { display: true, text: '対称性 (%)', font: { size: 10 } },
-            min: 0, max: 100,
+            min: 0,
+            suggestedMax: symMax,
             grid: { drawOnChartArea: false }
           }
         };
@@ -4485,7 +4612,8 @@
           timelineScales.y2 = {
             type: 'linear', display: true, position: 'right',
             title: { display: true, text: '膝角度 (°)', font: { size: 10 } },
-            min: 0, max: kneeMax,
+            min: 0,
+            suggestedMax: kneeMax,  // データがkneeMaxを超えた場合は自動拡張
             grid: { drawOnChartArea: false }
           };
         }

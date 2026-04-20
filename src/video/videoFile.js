@@ -252,6 +252,7 @@ export async function startVideoPlaybackForAnalysis({
       const cleanup = () => {
         videoElement.removeEventListener('playing', onPlaying);
         videoElement.removeEventListener('error', onError);
+        videoElement.removeEventListener('ended', onEnded);
         if (timeoutHandle !== null) {
           clearTimeoutFn(timeoutHandle);
           timeoutHandle = null;
@@ -270,9 +271,21 @@ export async function startVideoPlaybackForAnalysis({
         cleanup();
         reject(new Error('Video error during play'));
       };
+      // Handle the edge case where the video ends before 'playing' fires
+      // (e.g., extremely short video that finishes before the browser can emit 'playing').
+      // In this case we resolve rather than hang, so the caller can observe ended=true
+      // and handle it (e.g., via the onended handler registered in startAnalysis).
+      const onEnded = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        logger.warn?.('[Analysis] "ended" fired before "playing" — very short video or fast decode');
+        resolve();
+      };
 
       videoElement.addEventListener('playing', onPlaying);
       videoElement.addEventListener('error', onError);
+      videoElement.addEventListener('ended', onEnded);
 
       // Safety timeout: resolve after playingTimeoutMs even if 'playing' never fires.
       // This prevents a permanent hang if the browser emits play() resolved but
