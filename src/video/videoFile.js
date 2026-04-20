@@ -175,7 +175,9 @@ export async function startVideoPlaybackForAnalysis({
   logger = console,
   now = () => Date.now(),
   reloadDelayMs = 100,
-  setTimeoutFn = setTimeout
+  playingTimeoutMs = 5000,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout
 }) {
   if (!videoElement) {
     throw new Error('Video element is required');
@@ -206,10 +208,26 @@ export async function startVideoPlaybackForAnalysis({
     // pending event listeners, causes the video to appear to start twice.
     // Simply resetting currentTime and calling play() is sufficient for a
     // replay after a normal end-of-stream.
-    if (videoElement.ended || videoElement.currentTime !== 0) {
+    //
+    // NOTE: stopAllProcessing() pre-seeks to currentTime=0 when the video ends,
+    // so on the second analysis currentTime is already 0.
+    //
+    // iOS Safari bug: awaiting the 100ms delay (even when currentTime is already 0)
+    // breaks the user-gesture context, causing play() to throw NotAllowedError.
+    // The delay is only needed when currentTime is NOT at 0 (i.e., the browser needs
+    // time to process the seek).  When currentTime is already 0 — which stopAllProcessing()
+    // guarantees — we skip the delay entirely and call play() immediately.
+    // This is the key fix for "second analysis fails on iOS Safari".
+    if (videoElement.currentTime !== 0) {
+      // Need to seek: set currentTime=0 and give the browser a tick to process it.
       videoElement.currentTime = 0;
       // Give the browser one tick to process the seek before play().
       await new Promise((resolve) => setTimeoutFn(resolve, reloadDelayMs));
+    } else if (videoElement.ended) {
+      // currentTime is already 0 (pre-seeked by stopAllProcessing) but ended=true.
+      // On most browsers play() clears the ended flag without a seek delay.
+      // No await needed — call play() directly to preserve the gesture context.
+      logger.log('[Analysis] Video ended but currentTime=0 (pre-seeked); skipping delay before play()');
     }
 
     // Wait for the 'playing' event to confirm the browser has actually started
@@ -217,25 +235,62 @@ export async function startVideoPlaybackForAnalysis({
     // play() resolves as soon as playback is *initiated*, but requestVideoFrameCallback
     // will never fire if videoElement.ended is still true at registration time.
     // Waiting for 'playing' guarantees ended=false and the first frame is incoming.
+    //
+    // Timeout fallback (playingTimeoutMs): if 'playing' never fires (e.g., due to
+    // a browser quirk where play() resolves but 'playing' is delayed), we resolve
+    // anyway after the timeout so the caller is not permanently hung. This is a
+    // last-resort safety net; normal browsers always fire 'playing' after play().
     await new Promise((resolve, reject) => {
       // If already playing (not ended, not paused), resolve immediately.
       if (!videoElement.ended && !videoElement.paused) {
         resolve();
         return;
       }
-      const onPlaying = () => {
+      let settled = false;
+      let timeoutHandle = null;
+
+      const cleanup = () => {
         videoElement.removeEventListener('playing', onPlaying);
         videoElement.removeEventListener('error', onError);
+        if (timeoutHandle !== null) {
+          clearTimeoutFn(timeoutHandle);
+          timeoutHandle = null;
+        }
+      };
+
+      const onPlaying = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
         resolve();
       };
       const onError = () => {
-        videoElement.removeEventListener('playing', onPlaying);
-        videoElement.removeEventListener('error', onError);
+        if (settled) return;
+        settled = true;
+        cleanup();
         reject(new Error('Video error during play'));
       };
+
       videoElement.addEventListener('playing', onPlaying);
       videoElement.addEventListener('error', onError);
-      videoElement.play().catch(reject);
+
+      // Safety timeout: resolve after playingTimeoutMs even if 'playing' never fires.
+      // This prevents a permanent hang if the browser emits play() resolved but
+      // omits the 'playing' event (seen on some iOS Safari versions).
+      timeoutHandle = setTimeoutFn(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        logger.warn?.('[Analysis] "playing" event timeout — resolving anyway after ' + playingTimeoutMs + 'ms');
+        resolve();
+      }, playingTimeoutMs);
+
+      videoElement.play().catch((err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      });
     });
 
     logger.log('[Analysis] Video play() succeeded');
