@@ -57,10 +57,13 @@ function buildComments(summary) {
   const commentRules = REPORT_COMMENT_RULES[summary.reportPlane];
 
   if (summary.reportPlane === 'frontal') {
-    if (summary.avgSpeed < thresholds.speed.slowBelow) {
-      addRuleComment(comments, commentRules.speedSlow);
-    } else if (summary.avgSpeed > thresholds.speed.strongAbove) {
-      addRuleComment(comments, commentRules.speedStrong);
+    // 速度コメントは計測値がある場合のみ（未計測=avgSpeed=0 では出さない）
+    if (summary.metricAvailability.speed) {
+      if (summary.avgSpeed < thresholds.speed.slowBelow) {
+        addRuleComment(comments, commentRules.speedSlow);
+      } else if (summary.avgSpeed > thresholds.speed.strongAbove) {
+        addRuleComment(comments, commentRules.speedStrong);
+      }
     }
 
     // 対称性コメントは歩行イベント検出時のみ（未検出時は信頼できないため除外）
@@ -76,10 +79,13 @@ function buildComments(summary) {
       addRuleComment(comments, commentRules.trunkElevated);
     }
 
-    if (summary.avgCadence < thresholds.cadence.lowBelow) {
-      addRuleComment(comments, commentRules.cadenceLow);
-    } else if (summary.avgCadence > thresholds.cadence.strongAbove) {
-      addRuleComment(comments, commentRules.cadenceStrong);
+    // ケイデンスコメントも計測値がある場合のみ（未計測=avgCadence=0 では出さない）
+    if (summary.metricAvailability.cadence) {
+      if (summary.avgCadence < thresholds.cadence.lowBelow) {
+        addRuleComment(comments, commentRules.cadenceLow);
+      } else if (summary.avgCadence > thresholds.cadence.strongAbove) {
+        addRuleComment(comments, commentRules.cadenceStrong);
+      }
     }
   } else {
     // ─── 膝関節ピーク値コメント（KneePeakTracker が有効な場合のみ）──────────
