@@ -1,4 +1,4 @@
-export const APP_SEMVER = '3.10.62';
+export const APP_SEMVER = '3.10.63';
 export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`;
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。

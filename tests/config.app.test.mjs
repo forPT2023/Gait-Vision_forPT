@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { APP_SEMVER, APP_VERSION_LABEL, buildSessionId } from '../src/config/app.js';
 
 test('app version constants stay aligned', () => {
-  assert.equal(APP_SEMVER, '3.10.62');
-  assert.equal(APP_VERSION_LABEL, 'Gait VISION forPT v3.10.62');
+  assert.equal(APP_SEMVER, '3.10.63');
+  assert.equal(APP_VERSION_LABEL, 'Gait VISION forPT v3.10.63');
 });
 
 test('buildSessionId composes a stable session identifier from patient and timestamp', () => {
