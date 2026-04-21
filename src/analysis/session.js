@@ -56,6 +56,13 @@ export function buildAnalysisDataPoint({
   emaValues,
   kneeSymmetry
 }) {
+  // kneeSymmetry === null は「未計算」（歩行イベントなし・矢状面で片側ゼロ等）を意味する。
+  // null をそのまま格納し、averageMetric や pushPoint 側で除外することで
+  // デフォルト100が平均値・チャートに混入するのを防ぐ。
+  const symmetryValue = (kneeSymmetry === null)
+    ? null
+    : clampMetric(kneeSymmetry, 0, 100, null);
+
   return {
     timestamp: elapsedMs,
     recordedAt: analysisStartEpochMs + elapsedMs,
@@ -66,7 +73,7 @@ export function buildAnalysisDataPoint({
     angles,
     speed: clampMetric(emaValues.speed, 0, 5),
     cadence: clampMetric(emaValues.cadence, 0, 200),
-    symmetry: clampMetric(kneeSymmetry, 0, 100, 100),
+    symmetry: symmetryValue,
     trunk: clampMetric(emaValues.trunk, 0, 45),
     pelvis: clampMetric(emaValues.pelvis, 0, 30),
     leftKnee: clampMetric(emaValues.leftKnee, 0, 180),
