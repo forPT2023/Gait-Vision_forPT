@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.65 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8)');
+    console.log('[Gait-Vision] v3.10.66 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -1650,7 +1650,8 @@
                     timestamp: Date.now(),
                     speed: isFinite(speed) ? Math.max(0, speed) : 0,
                     cadence: 0,
-                    symmetry: angles ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee) : 100,
+                    // プレビューではgaitEventsがないため対称性は常にnull（未計算）
+                    symmetry: angles ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee) : null,
                     trunk: isFinite(trunkAngle) ? Math.max(0, trunkAngle) : 0,
                     pelvis: isFinite(pelvicTilt) ? Math.max(0, pelvicTilt) : 0,
                     leftKnee: angles && isFinite(angles.leftKnee) ? angles.leftKnee : 0,
@@ -2800,9 +2801,12 @@
             }
 
             // 対称性: 前額面はステップ対称性（歩行イベントベース）、矢状面は膝角度ベース
+            // 前額面でgaitEventsがない場合は null（未計算）を返す。
+            // calcStepSymmetry はイベントなしで100を返すが、これは「測定不能」であり
+            // デフォルト値が analysisData やチャートに混入するのを防ぐ。
             const kneeSymmetry = (analysisPlane === 'sagittal' && angles)
               ? calcSymmetryIndex(angles.leftKnee, angles.rightKnee)
-              : calcStepSymmetry(gaitEvents);
+              : (gaitEvents.length >= 4 ? calcStepSymmetry(gaitEvents) : null);
 
             // ── Layer 3: データ追加判定 ────────────────────────────────────────────
             // 高品質フレームのみ analysisData に追加（中品質はチャートのみ更新）

@@ -1,5 +1,5 @@
-export const APP_SEMVER = '3.10.65';
-export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#8 speed EMA worldLandmarks guard
+export const APP_SEMVER = '3.10.66';
+export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#9 symmetry null化・speed=0チャートskip
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。
 // モジュールスコープで保持するため、同一ページセッション中はリセットされない。

@@ -161,6 +161,10 @@ export function createChartController({ ChartCtor, document, getVideoContext, no
     const pushPoint = (chartName, datasetIndex, value) => {
       const chart = charts[chartName];
       if (chart?.data?.datasets?.[datasetIndex]) {
+        // null は「未計算」を意味するのでスキップし、チャートに gap（空白）を作る。
+        // これにより対称性が未計算の開始直後などに誤った値がプロットされない。
+        if (value === null) return;
+
         const safeValue = (typeof value === 'number' && Number.isFinite(value)) ? value : 0;
 
         // ゼロ値かつチャートの最小値がゼロより大きい場合（例: cadence chart min=60）は
@@ -184,7 +188,9 @@ export function createChartController({ ChartCtor, document, getVideoContext, no
       }
     };
 
-    pushPoint('speed', 0, dataPoint.speed);
+    // speed=0 は「計測不能フレーム」（deltaT=0 など）を意味するのでスキップする。
+    // レポートの averageMetric も excludeZero:true でゼロを除外しており、それと一致させる。
+    if (dataPoint.speed > 0) pushPoint('speed', 0, dataPoint.speed);
     pushPoint('cadence', 0, dataPoint.cadence);
     pushPoint('symmetry', 0, dataPoint.symmetry);
     pushPoint('trunk', 0, dataPoint.trunk);

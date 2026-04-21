@@ -129,6 +129,37 @@ test('buildAnalysisDataPoint clamps metrics and preserves frame metadata', () =>
   assert.equal(point.rightAnkle, 0);
 });
 
+test('buildAnalysisDataPoint: kneeSymmetry=null yields symmetry=null (未計算)', () => {
+  // 歩行イベントなし・前額面では kneeSymmetry=null が渡される。
+  // null はデフォルト100ではなく null のまま格納され、
+  // averageMetric やチャートが除外することで偽100%の混入を防ぐ。
+  const point = buildAnalysisDataPoint({
+    elapsedMs: 0,
+    analysisStartEpochMs: 0,
+    mpTimestamp: 0,
+    landmarks: [],
+    worldLandmarks: null,
+    angles: null,
+    emaValues: { speed: 0, cadence: 0, trunk: 3, pelvis: 2, leftKnee: 0, rightKnee: 0, leftHip: 0, rightHip: 0, leftAnkle: 0, rightAnkle: 0 },
+    kneeSymmetry: null
+  });
+  assert.strictEqual(point.symmetry, null, 'symmetry should be null when kneeSymmetry is null');
+});
+
+test('buildAnalysisDataPoint: valid kneeSymmetry is clamped and stored', () => {
+  const point = buildAnalysisDataPoint({
+    elapsedMs: 500,
+    analysisStartEpochMs: 0,
+    mpTimestamp: 500,
+    landmarks: [],
+    worldLandmarks: null,
+    angles: null,
+    emaValues: { speed: 1.2, cadence: 110, trunk: 5, pelvis: 3, leftKnee: 0, rightKnee: 0, leftHip: 0, rightHip: 0, leftAnkle: 0, rightAnkle: 0 },
+    kneeSymmetry: 85
+  });
+  assert.strictEqual(point.symmetry, 85, 'valid symmetry should be stored as-is');
+});
+
 test('buildAnalysisDataPoint clamps speed to max 5 m/s', () => {
   const point = buildAnalysisDataPoint({
     elapsedMs: 1000,
