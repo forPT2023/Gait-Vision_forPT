@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.64 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7)');
+    console.log('[Gait-Vision] v3.10.65 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -2775,10 +2775,16 @@
               emaValues.rightAnkle = ema(emaValues.rightAnkle, angles.rightAnkle, displayEmaAlpha);
             }
             if (prevTimestamp !== null) {
+              // Bug#8修正: worldLandmarks または prevWorldLandmarks が null のフレームは
+              // speed = 0 になるが、これは「計測不能」であり EMA に混入させてはいけない。
+              // trunk/pelvis（Bug#6）と同様に worldLandmarks && prevWorldLandmarks の
+              // 存在チェックでガードする。
               // 速度EMAの初期ラグ対策: 最初の有効速度フレームで直接シード（EMA=0スタートを回避）
-              emaValues.speed = (emaValues.speed === 0 && speed > 0)
-                ? speed
-                : ema(emaValues.speed, speed, displayEmaAlpha);
+              if (worldLandmarks && prevWorldLandmarks) {
+                emaValues.speed = (emaValues.speed === 0 && speed > 0)
+                  ? speed
+                  : ema(emaValues.speed, speed, displayEmaAlpha);
+              }
               // Bug#6修正: worldLandmarks が null のフレームは trunkAngle/pelvicTilt = 0 になるが、
               // これは「計測不能」であり EMA に混入させてはいけない。
               // angles 同様に worldLandmarks の存在チェックでガードする。

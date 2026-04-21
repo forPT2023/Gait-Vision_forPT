@@ -1,5 +1,5 @@
-export const APP_SEMVER = '3.10.64';
-export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#6 trunk/pelvis EMA guard + Bug#7 sessionId consistency
+export const APP_SEMVER = '3.10.65';
+export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#8 speed EMA worldLandmarks guard
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。
 // モジュールスコープで保持するため、同一ページセッション中はリセットされない。
