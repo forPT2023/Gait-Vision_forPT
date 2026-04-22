@@ -114,8 +114,6 @@ export function applyPdfImageLayout({ pdf, imgData, layout, format = 'PNG' }) {
 export function buildReportHtml(summary) {
   return `
     <div class="report-compact">
-      <h1>📄 Gait VISION forPT - 分析レポート</h1>
-
       <div class="report-info-grid">
         <div class="report-info-item">
           <div class="report-info-label">対象者ID</div>
