@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.66 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9)');
+    console.log('[Gait-Vision] v3.10.67 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -3447,6 +3447,69 @@
           ? (analysisFrameCount / (analysisDurationMs / 1000))
           : 5;
 
+        // ── Bug#10修正: フル尺エクスポート ────────────────────────────────────
+        // 従来は analysisData のフレームのみをエクスポートしていたため、
+        //   1) 先頭ウォームアップ3フレーム分（30fps≈100ms、3fps≈1s）が欠ける
+        //   2) 末尾の低品質フレームが analysisData に入らず欠ける
+        // という問題があった。
+        //
+        // 修正: 動画の全体尺（0 〜 videoDuration）を estimatedFps で均等分割し、
+        // 各出力フレームに最近傍の analysisData エントリを割り当てる。
+        // 解析範囲外のフレームは dataPoint=null（ランドマークなし）として
+        // 動画フレームのみを drawFrame で描画する。
+        //
+        // exportFrames[i] = { targetSec, ptsMicros, dataPoint }
+        //   targetSec  : エクスポート動画上でシークすべき動画時刻（秒）
+        //   ptsMicros  : 出力ファイルの PTS（マイクロ秒）
+        //   dataPoint  : 対応する analysisData エントリ（ない場合は null）
+        const videoDurationSec = Number.isFinite(exportVideoElement.duration) && exportVideoElement.duration > 0
+          ? exportVideoElement.duration
+          : (analysisVideoStartMs + lastElapsedMs) / 1000;
+        const exportFps = Math.max(1, Math.round(estimatedFps));
+        const exportFrameIntervalMs = 1000 / exportFps;
+        // 全フレーム数（先頭0秒から末尾 videoDurationSec まで）
+        const totalExportFrameCount = Math.max(analysisFrameCount, Math.round(videoDurationSec * exportFps));
+
+        // analysisData を targetSec でインデックス化（最近傍探索用）
+        // targetSec = (analysisVideoStartMs + elapsedMs) / 1000
+        const exportFrames = [];
+        let analysisIdx = 0; // analysisData の走査ポインタ
+        for (let fi = 0; fi < totalExportFrameCount; fi++) {
+          const targetSec = (fi / exportFps); // 出力フレームの動画時刻（秒）
+          const ptsMicros = Math.round(fi * exportFrameIntervalMs * 1000); // μs
+
+          // このフレームに最も近い analysisData エントリを探す
+          // targetSec に対応する analysisVideoStartMs を考慮した elapsedMs
+          const targetElapsedMs = targetSec * 1000 - analysisVideoStartMs;
+
+          // 前進: targetElapsedMs を超えない最後のanalysisDataエントリまで進める
+          while (
+            analysisIdx + 1 < analysisFrameCount &&
+            Math.abs((analysisData[analysisIdx + 1]?.elapsedMs ?? 0) - targetElapsedMs) <
+            Math.abs((analysisData[analysisIdx]?.elapsedMs ?? 0) - targetElapsedMs)
+          ) {
+            analysisIdx++;
+          }
+
+          // 範囲チェック: 解析開始前・解析終了後はランドマークなし
+          const nearestElapsedMs = analysisData[analysisIdx]?.elapsedMs ?? 0;
+          const isInAnalysisRange = analysisFrameCount > 0
+            && targetElapsedMs >= firstElapsedMs - exportFrameIntervalMs
+            && targetElapsedMs <= lastElapsedMs + exportFrameIntervalMs
+            && Math.abs(nearestElapsedMs - targetElapsedMs) <= exportFrameIntervalMs * 2;
+
+          exportFrames.push({
+            targetSec,
+            ptsMicros,
+            dataPoint: isInAnalysisRange ? analysisData[analysisIdx] : null
+          });
+        }
+        const totalExportFrames = exportFrames.length;
+        dbgLog('[renderBlob] exportFrames built: total=' + totalExportFrames
+          + ' videoDurationSec=' + videoDurationSec.toFixed(2)
+          + ' exportFps=' + exportFps
+          + ' analysisVideoStartMs=' + analysisVideoStartMs.toFixed(1));
+
         // 解析ループの共通変数
         const expW  = exportCanvas.width;
         const expH  = exportCanvas.height;
@@ -3625,10 +3688,12 @@
         // タイムアウト: seek処理の最大待機時間（フレーム数×6s + 30s、最低120s）
         // seekTo のタイムアウトが 5s なので、フレームごとに最悪 5s かかる想定。
         // createImageBitmap と encode に約 1s の余裕を加算。
-        const exportTotalMs = Math.max(120000, analysisFrameCount * 6000 + 30000);
+        const exportTotalMs = Math.max(120000, totalExportFrames * 6000 + 30000);
         console.log('[Export] estimatedFps:', estimatedFps.toFixed(2),
-          '| frameCount:', analysisFrameCount,
+          '| analysisFrameCount:', analysisFrameCount,
+          '| totalExportFrames:', totalExportFrames,
           '| analysisDurationMs:', analysisDurationMs.toFixed(0),
+          '| videoDurationSec:', videoDurationSec.toFixed(2),
           '| exportTotalMs:', exportTotalMs,
           '| analysisVideoStartMs:', analysisVideoStartMs.toFixed(1),
           '| firstElapsedMs:', firstElapsedMs.toFixed(0),
@@ -3951,7 +4016,7 @@
               console.log('[Export] pipeline encoding with:', selectedCodec.type,
                 '| codec:', selectedCodec.config.codec,
                 '| encW:', encW, 'encH:', encH,
-                '| frames:', analysisFrameCount);
+                '| frames:', totalExportFrames, '(analysis:', analysisFrameCount, ')');
 
               const flushWithTimeout = () => new Promise((resolve, reject) => {
                 flushReject = reject;
@@ -3979,17 +4044,14 @@
               });
 
               const pipelineLoop = async () => {
-                for (let i = 0; i < analysisFrameCount; i++) {
+                // Bug#10: exportFrames（動画全体尺）を使ってフル尺エクスポート
+                for (let i = 0; i < totalExportFrames; i++) {
                   if (encoderErrRef.current) throw encoderErrRef.current;
                   if (encoder.state === 'closed') throw new Error('[Export] encoder closed at frame ' + i);
 
-                  const dataPoint = analysisData[i];
-                  const targetSec = (analysisVideoStartMs + (dataPoint.elapsedMs ?? 0)) / 1000;
-                  const ptsMicros = Math.round(((dataPoint.elapsedMs ?? 0) - firstElapsedMs) * 1000);
-                  const dur = i < analysisFrameCount - 1
-                    ? Math.round(((analysisData[i + 1]?.elapsedMs ?? analysisData[i].elapsedMs) - (analysisData[i].elapsedMs ?? 0)) * 1000)
-                    : Math.round((analysisDurationMs / Math.max(1, analysisFrameCount - 1)) * 1000);
-                  const safeDur = Math.max(1000, dur);
+                  const ef = exportFrames[i];
+                  const { targetSec, ptsMicros, dataPoint } = ef;
+                  const safeDur = Math.round(exportFrameIntervalMs * 1000);
                   const isKeyFrame = (i === 0) || (i % wcKeyFrameInterval === 0);
 
                   // seek
@@ -4006,6 +4068,7 @@
                   }
 
                   // draw → VideoFrame → encode → 即close（メモリ解放）
+                  // dataPoint=null の場合はランドマークなしで動画フレームのみ描画
                   drawFrame(dataPoint);
                   const bitmap = await createImageBitmap(exportCanvas, 0, 0, expW, expH,
                     { resizeWidth: encW, resizeHeight: encH });
@@ -4015,9 +4078,12 @@
                   vf.close();
 
                   // プログレス 0〜99%
-                  if (onProgress) onProgress(Math.min(99, ((i + 1) / analysisFrameCount) * 99));
-                  if (i < 5 || i === analysisFrameCount - 1 || i % 10 === 0) {
-                    dbgLog('[pipeline] frame ' + (i+1) + '/' + analysisFrameCount + ' pts=' + ptsMicros + ' target=' + targetSec.toFixed(3) + ' ct=' + exportVideoElement.currentTime.toFixed(3) + ' rs=' + exportVideoElement.readyState);
+                  if (onProgress) onProgress(Math.min(99, ((i + 1) / totalExportFrames) * 99));
+                  if (i < 5 || i === totalExportFrames - 1 || i % 10 === 0) {
+                    dbgLog('[pipeline] frame ' + (i+1) + '/' + totalExportFrames
+                      + ' pts=' + ptsMicros + ' target=' + targetSec.toFixed(3)
+                      + ' hasLandmarks=' + (dataPoint?.landmarks?.length > 0)
+                      + ' ct=' + exportVideoElement.currentTime.toFixed(3) + ' rs=' + exportVideoElement.readyState);
                   }
                 }
               };
@@ -4115,22 +4181,19 @@
             });
 
             const doMRExport = async () => {
-              // フレーム間の「正しい間隔(ms)」を elapsedMs の差分から求め、
-              // seek完了後に不足分だけ sleep することで
-              // requestFrame() の呼び出し実時間間隔を動画の正しいフレーム間隔に揃える。
+              // Bug#10: exportFrames（動画全体尺）を使ってフル尺エクスポート
+              // フレーム間を均等間隔（exportFrameIntervalMs）で sleep することで
+              // MediaRecorder の実時間タイムスタンプを正しく揃える。
               let frameIntervalDeadlineMs = performance.now();
 
-              for (let i = 0; i < analysisFrameCount; i++) {
-                const dataPoint = analysisData[i];
-                const targetSec = (analysisVideoStartMs + (dataPoint.elapsedMs ?? 0)) / 1000;
-                const prevElapsedMs = i > 0 ? (analysisData[i - 1]?.elapsedMs ?? dataPoint.elapsedMs) : dataPoint.elapsedMs;
-                const frameIntervalMs = i > 0
-                  ? Math.max(16, (dataPoint.elapsedMs ?? 0) - (prevElapsedMs ?? 0))
-                  : 0;
+              for (let i = 0; i < totalExportFrames; i++) {
+                const ef = exportFrames[i];
+                const { targetSec, dataPoint } = ef;
 
-                frameIntervalDeadlineMs += frameIntervalMs;
+                frameIntervalDeadlineMs += exportFrameIntervalMs;
 
                 await seekTo(targetSec);
+                // dataPoint=null の場合はランドマークなしで動画フレームのみ描画
                 drawFrame(dataPoint);
 
                 const nowMs = performance.now();
@@ -4146,12 +4209,12 @@
                 }
 
                 if (onProgress) {
-                  onProgress(Math.min(99, ((i + 1) / analysisFrameCount) * 100));
+                  onProgress(Math.min(99, ((i + 1) / totalExportFrames) * 100));
                 }
                 if (i < 5) {
-                  console.log('[Export MR] frame', i + 1, '/', analysisFrameCount,
+                  console.log('[Export MR] frame', i + 1, '/', totalExportFrames,
                     '| targetSec:', targetSec.toFixed(4),
-                    '| frameIntervalMs:', frameIntervalMs.toFixed(1),
+                    '| hasLandmarks:', (dataPoint?.landmarks?.length > 0),
                     '| waited:', Math.max(0, waitMs).toFixed(1) + 'ms');
                 }
               }
