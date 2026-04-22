@@ -394,8 +394,10 @@
     </div>
     <div id="phone-stage-panel" class="hidden-panel">
       <div class="phone-stage-capture">
-        <div class="phone-stage-title">① 動画の取得（撮影 or アップロード）</div>
+        <div class="phone-stage-title">① 解析面・動画の選択</div>
         <div class="phone-stage-grid">
+          <button id="btn-phone-frontal" class="primary-action" style="grid-column: span 1;">前額面</button>
+          <button id="btn-phone-sagittal" class="accent-action" style="grid-column: span 1;">矢状面</button>
           <button id="btn-phone-stage-video" class="primary-action">📹 動画を撮影 / アップロード</button>
           <button id="btn-phone-stage-analyze" class="accent-action">▶️ ② 解析を開始</button>
         </div>
@@ -608,7 +610,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.67 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10)');
+    console.log('[Gait-Vision] v3.10.68 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10) + スマホ版矢状面選択ボタン追加 (Bug#11)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -1285,6 +1287,13 @@
       });
       syncPhoneVideoPreviews();
       syncPhoneQuickActions();
+      // スマホ版の前額面/矢状面ボタンの表示を currentPlane に同期
+      const pf = document.getElementById('btn-phone-frontal');
+      const ps = document.getElementById('btn-phone-sagittal');
+      if (pf && ps) {
+        pf.className = currentPlane === 'frontal' ? 'primary-action' : 'muted-action';
+        ps.className = currentPlane === 'sagittal' ? 'primary-action' : 'muted-action';
+      }
       return applyDeviceModeUi({
         documentRef: document,
         deviceMode,
@@ -4940,6 +4949,28 @@
     document.getElementById('btn-phone-analyzed-video').addEventListener('click', saveAnalyzedVideo);
     document.getElementById('btn-phone-csv').addEventListener('click', exportCSV);
     document.getElementById('btn-phone-report').addEventListener('click', generateReport);
+    // スマホ版 解析面切り替えボタン
+    const _applyPhonePlane = (plane) => {
+      currentPlane = plane;
+      applyPlaneModeUI({
+        frontalButton: document.getElementById('btn-frontal'),
+        sagittalButton: document.getElementById('btn-sagittal'),
+        chartsContainer: document.getElementById('charts-container'),
+        currentPlane
+      });
+      // スマホ用ボタンの見た目も切り替え
+      const pf = document.getElementById('btn-phone-frontal');
+      const ps = document.getElementById('btn-phone-sagittal');
+      if (pf && ps) {
+        pf.className = plane === 'frontal' ? 'primary-action' : 'muted-action';
+        ps.className = plane === 'sagittal' ? 'primary-action' : 'muted-action';
+      }
+      syncOrientationWarning();
+      showNotification(plane === 'sagittal' ? '矢状面モード' : '前額面モード', 'success');
+    };
+    document.getElementById('btn-phone-frontal').addEventListener('click', () => _applyPhonePlane('frontal'));
+    document.getElementById('btn-phone-sagittal').addEventListener('click', () => _applyPhonePlane('sagittal'));
+
     document.getElementById('btn-phone-stage-video').addEventListener('click', () => {
       loadVideoFile();
     });
