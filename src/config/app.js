@@ -1,5 +1,5 @@
-export const APP_SEMVER = '3.10.67';
-export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#10 解析動画フル尺エクスポート修正
+export const APP_SEMVER = '3.10.68';
+export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#10v3 解析動画マーカー遅延修正
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。
 // モジュールスコープで保持するため、同一ページセッション中はリセットされない。

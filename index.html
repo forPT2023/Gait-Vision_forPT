@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.67 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10)');
+    console.log('[Gait-Vision] v3.10.68 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10) + 解析動画マーカー遅延修正 (Bug#10v3)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -3447,42 +3447,71 @@
           ? (analysisFrameCount / (analysisDurationMs / 1000))
           : 5;
 
-        // ── Bug#10修正: フル尺エクスポート ────────────────────────────────────
-        // 従来は analysisData のフレームのみをエクスポートしていたため、
-        //   1) 先頭ウォームアップ3フレーム分（30fps≈100ms、3fps≈1s）が欠ける
-        //   2) 末尾の低品質フレームが analysisData に入らず欠ける
-        // という問題があった。
+        // ── Bug#10修正 v3: 解析範囲のフル尺エクスポート ───────────────────────
+        // 【出力範囲の設計】
+        //   開始: analysisVideoStartMs（解析ループが最初にフレームを処理した動画時刻）
+        //         ウォームアップ3フレームも含めて出力する。
+        //         ウォームアップ区間（firstElapsedMs未満）はdataPoint=nullで映像のみ描画。
+        //         ウォームアップ終了後（firstElapsedMs以降）はdataPoint付きでマーカー描画。
+        //   終了: 動画の終端（videoDurationSec）まで出力し末尾の欠けをなくす。
+        //         解析範囲外（末尾）はランドマークなしで動画フレームのみ描画。
         //
-        // 修正: 動画の全体尺（0 〜 videoDuration）を estimatedFps で均等分割し、
-        // 各出力フレームに最近傍の analysisData エントリを割り当てる。
-        // 解析範囲外のフレームは dataPoint=null（ランドマークなし）として
-        // 動画フレームのみを drawFrame で描画する。
+        // 【v2（Bug#10 2回目修正）との違い】
+        //   v2では exportStartSec = (analysisVideoStartMs + firstElapsedMs) / 1000 だったため
+        //   3fps環境でウォームアップ3フレーム分（≈1000ms）が動画先頭から切り捨てられ
+        //   「マーカーが遅れて表示される」問題が再発していた。
+        //   v3はウォームアップ区間を映像のみ（dataPoint=null）で出力することで
+        //   動画開始位置からエクスポートしつつ、マーカーはウォームアップ後から表示する。
+        //
+        // 【v1（Bug#10初回修正）との違い】
+        //   v1は動画の0秒から出力したため、解析開始前（例: 0〜8秒）に
+        //   マーカーなしの映像が長く続き「マーカーが遅れて出る」問題が発生。
+        //   v3は analysisVideoStartMs から出力するため、動画の余白部分は含まない。
         //
         // exportFrames[i] = { targetSec, ptsMicros, dataPoint }
         //   targetSec  : エクスポート動画上でシークすべき動画時刻（秒）
-        //   ptsMicros  : 出力ファイルの PTS（マイクロ秒）
-        //   dataPoint  : 対応する analysisData エントリ（ない場合は null）
+        //   ptsMicros  : 出力ファイルの PTS（マイクロ秒、0起点）
+        //   dataPoint  : 対応する analysisData エントリ（末尾余剰は null）
         const videoDurationSec = Number.isFinite(exportVideoElement.duration) && exportVideoElement.duration > 0
           ? exportVideoElement.duration
           : (analysisVideoStartMs + lastElapsedMs) / 1000;
         const exportFps = Math.max(1, Math.round(estimatedFps));
         const exportFrameIntervalMs = 1000 / exportFps;
-        // 全フレーム数（先頭0秒から末尾 videoDurationSec まで）
-        const totalExportFrameCount = Math.max(analysisFrameCount, Math.round(videoDurationSec * exportFps));
 
-        // analysisData を targetSec でインデックス化（最近傍探索用）
-        // targetSec = (analysisVideoStartMs + elapsedMs) / 1000
+        // 出力開始時刻: analysisVideoStartMs（解析ループが最初にフレームを処理した動画時刻）
+        // ウォームアップ3フレームも含めて出力するため firstElapsedMs は加算しない。
+        // ウォームアップ区間はdataPoint=nullで映像のみ描画し、ウォームアップ後のフレームから
+        // ランドマーク（マーカー）が付く。これにより「動画開始と同時に映像が始まり、
+        // ウォームアップ完了後（ほぼ直後）にマーカーが出現する」自然な挙動になる。
+        //
+        // Bug#10 v3修正: exportStartSec = analysisVideoStartMs / 1000
+        //   v2では exportStartSec = (analysisVideoStartMs + firstElapsedMs) / 1000 だったため
+        //   3fps環境でウォームアップ3フレーム分（≈1000ms）が動画先頭から切り捨てられ
+        //   「マーカーが遅れて表示される」問題が再発していた。
+        //   v3はウォームアップ区間を映像のみ（dataPoint=null）で出力することで解決。
+        const exportStartSec = analysisVideoStartMs / 1000;
+        // 出力終了時刻: 動画の終端（末尾フレームまで含める）
+        const exportEndSec = videoDurationSec;
+        // 全出力フレーム数
+        const totalExportFrameCount = Math.max(
+          analysisFrameCount,
+          Math.ceil((exportEndSec - exportStartSec) * exportFps)
+        );
+
+        // exportFrames 生成
+        // targetSec は exportStartSec を0基点として均等分割
         const exportFrames = [];
-        let analysisIdx = 0; // analysisData の走査ポインタ
+        let analysisIdx = 0;
         for (let fi = 0; fi < totalExportFrameCount; fi++) {
-          const targetSec = (fi / exportFps); // 出力フレームの動画時刻（秒）
-          const ptsMicros = Math.round(fi * exportFrameIntervalMs * 1000); // μs
+          // 動画上のシーク先時刻
+          const targetSec = exportStartSec + fi * exportFrameIntervalMs / 1000;
+          // 出力ファイルのPTS（0起点）
+          const ptsMicros = Math.round(fi * exportFrameIntervalMs * 1000);
 
           // このフレームに最も近い analysisData エントリを探す
-          // targetSec に対応する analysisVideoStartMs を考慮した elapsedMs
           const targetElapsedMs = targetSec * 1000 - analysisVideoStartMs;
 
-          // 前進: targetElapsedMs を超えない最後のanalysisDataエントリまで進める
+          // 前進: targetElapsedMs に近づく方向へ走査ポインタを進める
           while (
             analysisIdx + 1 < analysisFrameCount &&
             Math.abs((analysisData[analysisIdx + 1]?.elapsedMs ?? 0) - targetElapsedMs) <
@@ -3491,7 +3520,9 @@
             analysisIdx++;
           }
 
-          // 範囲チェック: 解析開始前・解析終了後はランドマークなし
+          // 解析範囲内かチェック（ウォームアップ区間・末尾余剰はランドマークなし）
+          // targetElapsedMs < 0 はウォームアップ区間（exportStartSec より前）なのでnull。
+          // firstElapsedMs 以降かつ lastElapsedMs + 余裕以内をランドマーク付きとする。
           const nearestElapsedMs = analysisData[analysisIdx]?.elapsedMs ?? 0;
           const isInAnalysisRange = analysisFrameCount > 0
             && targetElapsedMs >= firstElapsedMs - exportFrameIntervalMs
@@ -3505,10 +3536,17 @@
           });
         }
         const totalExportFrames = exportFrames.length;
+        const warmupFrameCount = exportFrames.filter(f => f.dataPoint === null
+          && exportFrames.indexOf(f) < totalExportFrames
+          && (exportStartSec + exportFrames.indexOf(f) * exportFrameIntervalMs / 1000) * 1000 - analysisVideoStartMs < firstElapsedMs
+        ).length;
         dbgLog('[renderBlob] exportFrames built: total=' + totalExportFrames
-          + ' videoDurationSec=' + videoDurationSec.toFixed(2)
+          + ' exportStartSec=' + exportStartSec.toFixed(3)
+          + ' exportEndSec=' + exportEndSec.toFixed(3)
           + ' exportFps=' + exportFps
-          + ' analysisVideoStartMs=' + analysisVideoStartMs.toFixed(1));
+          + ' analysisVideoStartMs=' + analysisVideoStartMs.toFixed(1)
+          + ' firstElapsedMs=' + firstElapsedMs.toFixed(0)
+          + ' warmupFramesInExport=' + warmupFrameCount);
 
         // 解析ループの共通変数
         const expW  = exportCanvas.width;
@@ -3698,8 +3736,8 @@
           '| analysisVideoStartMs:', analysisVideoStartMs.toFixed(1),
           '| firstElapsedMs:', firstElapsedMs.toFixed(0),
           '| lastElapsedMs:', lastElapsedMs.toFixed(0),
-          '| firstTargetSec:', ((analysisVideoStartMs + firstElapsedMs) / 1000).toFixed(3),
-          '| lastTargetSec:', ((analysisVideoStartMs + lastElapsedMs) / 1000).toFixed(3),
+          '| exportStartSec:', exportStartSec.toFixed(3),
+          '| exportEndSec:', exportEndSec.toFixed(3),
           '| videoDuration:', exportVideoElement.duration,
           '| WebCodecs:', typeof VideoEncoder !== 'undefined');
 
