@@ -1,5 +1,5 @@
-export const APP_SEMVER = '3.10.68';
-export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // Bug#10v3 解析動画マーカー遅延修正
+export const APP_SEMVER = '3.10.69';
+export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // ブリッジ描画ループ: 解析開始直後の映像/マーカーズレ解消
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。
 // モジュールスコープで保持するため、同一ページセッション中はリセットされない。
