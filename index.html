@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.68 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10) + 解析動画マーカー遅延修正 (Bug#10v3)');
+    console.log('[Gait-Vision] v3.10.69 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10) + 解析動画マーカー遅延修正 (Bug#10v3) + ブリッジ描画ループ(映像/マーカーズレ解消)');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -723,6 +723,7 @@
     let recordedVideoBlob = null;
     let recordingMimeType = '';
     let animationFrameId = null;
+    let bridgeDrawRafId = null; // ブリッジ描画ループ用 rAF ID（startAnalysis スコープ外からキャンセル可能にする）
     let patientId = '';
     let analysisStartEpochMs = null;
     let analysisStartMpTimestamp = null;
@@ -2296,6 +2297,50 @@
         let isProcessingFrame = false; // detectForVideo の await 中は true
         let preDraw_skipCount = 0; // processFrame で preDraw.skip が続いた回数（デバッグ用）
 
+        // ── ブリッジ描画ループ: 解析開始〜最初のrVFC+detectForVideo完了までのギャップを埋める ──
+        // 問題:
+        //   解析開始後、最初の processFrame（drawImage→detectForVideo→drawEnhancedLandmarks）
+        //   が完了するまでに最大で「rVFC待ち(〜333ms@3fps) + detectForVideo(50〜200ms)」
+        //   ≈ 500ms以上の空白が生じる。
+        //   この間 canvasElement は静止したまま（または黒）だが動画フレームは進んでいる。
+        //   videoElement は display:none なのでユーザーには「映像が先行してマーカーが遅れる」
+        //   ように見える（canvasと動画の内容がズレているため）。
+        //
+        // 解決策:
+        //   frameCount が 0 の間（processFrame がまだ1回も drawImage を実行していない間）、
+        //   rAF ベースの軽量ループで canvas を videoElement の現在フレームで更新し続ける。
+        //   processFrame が初めて drawImage を呼んだ瞬間に frameCount が 1 になり
+        //   ブリッジは自動停止する。
+        //
+        // 安全性:
+        //   - ブリッジは drawImage のみ（detectForVideo は一切呼ばない）→ 超軽量
+        //   - processFrame の isProcessingFrame ガードとの競合なし
+        //   - stopAllProcessing() で isAnalyzing=false になれば即停止
+        //   - videoFile モードのみ適用（カメラモードはrAF頻度が高く問題が出にくい）
+        bridgeDrawRafId = null; // 前回のブリッジが残っていればリセット
+        if (videoFileUrl) {
+          const _runBridge = () => {
+            if (frameCount >= 1 || !isAnalyzing) {
+              bridgeDrawRafId = null;
+              return;
+            }
+            if (videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+              const cW = canvasElement.width;
+              const cH = canvasElement.height;
+              const vW = videoElement.videoWidth;
+              const vH = videoElement.videoHeight;
+              if (cW > 0 && cH > 0) {
+                const rect = calcVideoDrawRect(cW, cH, vW, vH);
+                canvasCtx.clearRect(0, 0, cW, cH);
+                canvasCtx.drawImage(videoElement, rect.x, rect.y, rect.w, rect.h);
+              }
+            }
+            bridgeDrawRafId = requestAnimationFrame(_runBridge);
+          };
+          bridgeDrawRafId = requestAnimationFrame(_runBridge);
+          dbgLog('[startAnalysis] bridge draw loop started');
+        }
+
         // ── スタック検出タイマー ──────────────────────────────────────────────
         // ended=true は processFrame の Pre-draw ゲートで即座に stopAllProcessing() を
         // 呼ぶように修正済みのため、ended による無限ループは起きない。
@@ -2960,6 +3005,11 @@
     function stopAllProcessing() {
       dbgLog('[stopAllProcessing] isAnalyzing=' + isAnalyzing + ' videoFileUrl=' + (videoFileUrl ? 'YES' : 'null') + ' analysisData=' + analysisData.length + ' onended=' + (videoElement.onended ? 'set' : 'null'));
       isAnalyzing = false;
+      // ブリッジ描画ループを確実に停止（isAnalyzing=false でも rAF が1回余分に発火する可能性があるため）
+      if (bridgeDrawRafId !== null) {
+        cancelAnimationFrame(bridgeDrawRafId);
+        bridgeDrawRafId = null;
+      }
       // ビデオファイルモードで解析を実行した場合は、データ件数にかかわらず results ビューに遷移する。
       // analysisData が 0 件（ランドマーク未検出）でも results ビューへ移動し、
       // エラーメッセージを表示する。capture のまま残ると「解析後に最初の画面へ戻った」ように見えるバグを修正。
