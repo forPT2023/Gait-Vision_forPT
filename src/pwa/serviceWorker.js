@@ -3,7 +3,7 @@
 // This ensures the browser always fetches fresh resources from the network.
 // Note: sw.js path register('./sw.js') kept for compatibility check.
 
-export async function updateCacheStatus({ cachesRef = caches, documentRef = document, logger = console }) {
+export async function updateCacheStatus({ cachesRef = globalThis.caches, documentRef = document, logger = console }) {
   try {
     // Clear all caches
     const cacheNames = await cachesRef.keys();
@@ -20,7 +20,7 @@ export async function updateCacheStatus({ cachesRef = caches, documentRef = docu
   }
 }
 
-export function registerAppServiceWorker({ windowRef = window, navigatorRef = navigator, documentRef = document, showNotification, logger = console }) {
+export function registerAppServiceWorker({ windowRef = window, navigatorRef = navigator, documentRef = document, cachesRef = globalThis.caches, showNotification, logger = console }) {
   if (!('serviceWorker' in navigatorRef)) return;
 
   // Unregister ALL service workers and clear ALL caches immediately
@@ -33,11 +33,13 @@ export function registerAppServiceWorker({ windowRef = window, navigatorRef = na
         logger.log('[SW] Unregistered:', reg.scope);
       }
 
-      // 2. Delete all caches
-      const cacheNames = await caches.keys();
-      for (const name of cacheNames) {
-        await caches.delete(name);
-        logger.log('[SW] Deleted cache:', name);
+      // 2. Delete all caches (use injected cachesRef for testability)
+      if (cachesRef) {
+        const cacheNames = await cachesRef.keys();
+        for (const name of cacheNames) {
+          await cachesRef.delete(name);
+          logger.log('[SW] Deleted cache:', name);
+        }
       }
 
       logger.log('[SW] All service workers unregistered. Running without SW (network-only).');

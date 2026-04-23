@@ -1,5 +1,5 @@
-export const APP_SEMVER = '3.10.69';
-export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // ブリッジ描画ループ: 解析開始直後の映像/マーカーズレ解消
+export const APP_SEMVER = '3.10.70';
+export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // 最終コードレビュー: serviceWorker/db/export/phoneFlow小バグ修正
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。
 // モジュールスコープで保持するため、同一ページセッション中はリセットされない。

@@ -13,8 +13,6 @@ export function getPhoneFlowState({
   const normalizedView = isAnalyzing
     ? 'analyzing'
     : (currentView === 'results' ? 'results' : 'capture');
-  const chartsVisible = visible ? normalizedView === 'results' : true;
-
   if (!visible) {
     return {
       visible: false,

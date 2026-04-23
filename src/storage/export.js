@@ -1,5 +1,3 @@
-import { APP_VERSION_LABEL } from '../config/app.js';
-
 const ANALYSIS_CSV_HEADER = 'elapsed_ms,speed_m_s,cadence_spm,symmetry_pct,trunk_deg,pelvis_deg,left_knee_deg,right_knee_deg,left_hip_deg,right_hip_deg,left_ankle_deg,right_ankle_deg';
 
 function toFiniteNumber(value, fallback = 0) {
