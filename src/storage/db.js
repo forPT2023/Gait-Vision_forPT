@@ -101,7 +101,7 @@ export function createSessionStorage({
 
       const key = await getOrCreateEncryptionKey();
       const iv = cryptoRef.getRandomValues(new Uint8Array(12));
-      const encoded = new TextEncoder().encode(JSON.stringify(sessionData));
+      const encoded = new globalThis.TextEncoder().encode(JSON.stringify(sessionData));
       const encrypted = await cryptoRef.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
       const encryptedData = { iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) };
 
@@ -150,7 +150,7 @@ export function createSessionStorage({
         if (!cipherArray) throw new Error('Encrypted payload missing');
         const ciphertext = new Uint8Array(cipherArray);
         const decrypted = await cryptoRef.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-        const sessionData = JSON.parse(new TextDecoder().decode(decrypted));
+        const sessionData = JSON.parse(new globalThis.TextDecoder().decode(decrypted));
         decryptedSessions.push({
           id: session.id,
           patientId: session.patientId,

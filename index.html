@@ -608,7 +608,7 @@
     import { configureVideoElementForFile, createVideoFileInput, disposeVideoFileInput, startVideoPlaybackForAnalysis, triggerVideoFilePicker, waitForVideoLoad } from './src/video/videoFile.js';
 
     // ── VERSION TAG (for cache-busting verification) ──────────────────────────────
-    console.log('[Gait-Vision] v3.10.69 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10) + 解析動画マーカー遅延修正 (Bug#10v3) + ブリッジ描画ループ(映像/マーカーズレ解消)');
+    console.log('[Gait-Vision] v3.10.70 loaded — fix: trunk/pelvis EMA guard (Bug#6) + sessionId consistency (Bug#7) + speed EMA guard (Bug#8) + symmetry null化・speed=0チャートskip (Bug#9) + 解析動画フル尺エクスポート (Bug#10) + 解析動画マーカー遅延修正 (Bug#10v3) + ブリッジ描画ループ(映像/マーカーズレ解消) + 最終コードレビュー小バグ修正');
 
     // ── DEBUG LOG PANEL (スマホ Safari 診断用) ────────────────────────────────────
     // sessionStorage にログを永続化することで、画面がリセットされた後でも読み出せる。
@@ -3586,9 +3586,8 @@
           });
         }
         const totalExportFrames = exportFrames.length;
-        const warmupFrameCount = exportFrames.filter(f => f.dataPoint === null
-          && exportFrames.indexOf(f) < totalExportFrames
-          && (exportStartSec + exportFrames.indexOf(f) * exportFrameIntervalMs / 1000) * 1000 - analysisVideoStartMs < firstElapsedMs
+        const warmupFrameCount = exportFrames.filter((f, fi) => f.dataPoint === null
+          && (exportStartSec + fi * exportFrameIntervalMs / 1000) * 1000 - analysisVideoStartMs < firstElapsedMs
         ).length;
         dbgLog('[renderBlob] exportFrames built: total=' + totalExportFrames
           + ' exportStartSec=' + exportStartSec.toFixed(3)
