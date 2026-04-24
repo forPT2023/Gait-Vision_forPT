@@ -1278,7 +1278,7 @@
         window._lastSyncUiStateKey = _syncUiStateKey;
         dbgLog('[syncUI] mode=' + deviceMode + ' phoneFlowView=' + phoneFlowView + ' view=' + phoneFlowState.view + ' analysisData=' + analysisData.length + ' isAnalyzing=' + isAnalyzing + ' hasVideoFile=' + !!videoFileUrl);
       }
-      if (deviceMode === 'phone') enableDebugPanel();
+      // if (deviceMode === 'phone') enableDebugPanel(); // デバッグパネルボタン非表示（本番）
       chartsVisibleOnPhone = phoneFlowState.chartsVisible;
       applyPhoneFlowUi({
         documentRef: document,
