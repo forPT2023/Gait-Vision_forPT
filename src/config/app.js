@@ -1,5 +1,5 @@
-export const APP_SEMVER = '3.10.70';
-export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // 最終コードレビュー: serviceWorker/db/export/phoneFlow小バグ修正
+export const APP_SEMVER = '3.10.71';
+export const APP_VERSION_LABEL = `Gait VISION forPT v${APP_SEMVER}`; // fix(marker): スマホ動画モードでのキャンバスサイズ不一致によるマーカーズレ修正 (Bug#11)
 
 // 同一ミリ秒内に複数回生成されたときの衝突を防ぐためのモノトニックカウンター。
 // モジュールスコープで保持するため、同一ページセッション中はリセットされない。
